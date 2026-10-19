@@ -1,4 +1,5 @@
 import type { Lesson, LessonSummary, Mode, Progress } from '../../shared/lesson';
+import type { SourceInput, SourceBundle, BundleSummary } from '../../shared/sources';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch('/api' + path, options);
@@ -7,6 +8,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return body as T;
 }
 export const api = {
+  bundles: () => request<BundleSummary[]>('/source-bundles'),
+  bundle: (id: string) => request<SourceBundle>('/source-bundles/' + encodeURIComponent(id)),
+  retrySources: (id: string) => request<SourceBundle>('/source-bundles/' + encodeURIComponent(id) + '/retry', { method: 'POST' }),
+  capture: (input: SourceInput) => request<SourceBundle>('/source-bundles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
   list: () => request<LessonSummary[]>('/lessons'),
   lesson: (id: string) => request<Lesson>('/lessons/' + encodeURIComponent(id)),
   progress: (id: string) => request<Progress>('/lessons/' + encodeURIComponent(id) + '/progress'),

@@ -61,6 +61,7 @@ test('dialogue retains its diagram and changes the displayed content', async ({ 
 test('import rejects malformed JSON and accepts a single-mode lesson', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Add a lesson', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Import a prepared lesson' }).click();
   const input = page.getByLabel('Lesson JSON file');
   await input.setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{') });
   await expect(page.getByRole('alert')).toContainText('not valid JSON');

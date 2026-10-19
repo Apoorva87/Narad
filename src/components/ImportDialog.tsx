@@ -32,6 +32,6 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     </button>
     {error && <div className="error-box" role="alert">{error}</div>}
     <button className="text-link" onClick={() => void example()}><Download size={15} />Download an example lesson</button>
-    <p className="stage-note">Creating lessons from links, papers, and topics is the next build milestone. This first version focuses on reading prepared content.</p>
+    <p className="stage-note">To start with ideas, images, or article links, choose Add a lesson. This option is for importing an already prepared Narad lesson.</p>
   </Modal>;
 }

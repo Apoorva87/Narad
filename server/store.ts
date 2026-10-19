@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { parseLesson, modes, type Lesson, type LessonSummary, type Mode, type Progress } from '../shared/lesson';
 import { flattenBlocks } from '../shared/navigation';
+import type { SourceBundle, BundleSummary, AssetBlob } from '../shared/sources';
 
 export class StoreError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -13,6 +14,7 @@ export class LessonStore {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     this.db.exec('CREATE TABLE IF NOT EXISTS lessons (id TEXT PRIMARY KEY, document TEXT NOT NULL, saved_at INTEGER NOT NULL);');
     this.db.exec('CREATE TABLE IF NOT EXISTS progress (lesson_id TEXT NOT NULL REFERENCES lessons(id), mode TEXT NOT NULL, block_id TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (lesson_id, mode));');
+    this.db.exec('CREATE TABLE IF NOT EXISTS source_bundles (id TEXT PRIMARY KEY, document TEXT NOT NULL, saved_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS source_assets (id TEXT PRIMARY KEY, bytes BLOB NOT NULL, type TEXT NOT NULL);');
   }
   list(): LessonSummary[] {
     return this.db.prepare('SELECT document FROM lessons ORDER BY saved_at DESC, id ASC').all().map(row => {
@@ -44,6 +46,29 @@ export class LessonStore {
     const rows = this.db.prepare('SELECT mode, block_id FROM progress WHERE lesson_id = ? ORDER BY updated_at DESC, rowid DESC').all(id);
     return { lastMode: (rows[0]?.mode as Mode) ?? null,
       positions: Object.fromEntries(rows.map(row => [row.mode, row.block_id])) };
+  }
+  saveBundle(bundle: SourceBundle, blobs: AssetBlob[]): void {
+    this.db.exec('BEGIN');
+    try {
+      const insert = this.db.prepare('INSERT OR IGNORE INTO source_assets (id, bytes, type) VALUES (?, ?, ?)');
+      for (const blob of blobs) insert.run(blob.id, blob.bytes, blob.type);
+      this.db.prepare('INSERT INTO source_bundles (id, document, saved_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET document=excluded.document, saved_at=excluded.saved_at').run(bundle.id, JSON.stringify(bundle), Date.now());
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  listBundles(): BundleSummary[] {
+    return this.db.prepare('SELECT document FROM source_bundles ORDER BY saved_at DESC').all().map(row => {
+      const bundle = JSON.parse(row.document as string) as SourceBundle;
+      return { id: bundle.id, title: bundle.title, createdAt: bundle.createdAt, status: bundle.status,
+        sourceCount: bundle.sources.length, visualCount: bundle.sources.reduce((sum, source) => sum + source.inventory.savedVisuals, 0), warningCount: bundle.sources.reduce((sum, source) => sum + source.warnings.length, 0) };
+    });
+  }
+  getBundle(id: string): SourceBundle | undefined {
+    const row = this.db.prepare('SELECT document FROM source_bundles WHERE id = ?').get(id);
+    return row ? JSON.parse(row.document as string) : undefined;
+  }
+  getAsset(id: string): { bytes: Uint8Array; type: string } | undefined {
+    return this.db.prepare('SELECT bytes, type FROM source_assets WHERE id = ?').get(id) as { bytes: Uint8Array; type: string } | undefined;
   }
   close(): void { if (!this.closed) { this.db.close(); this.closed = true; } }
 }

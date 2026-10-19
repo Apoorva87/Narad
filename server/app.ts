@@ -4,13 +4,48 @@ import { resolve } from 'node:path';
 import { z, ZodError } from 'zod';
 import { modes, parseLesson } from '../shared/lesson';
 import { type LessonStore, StoreError } from './store';
+import { prepareSources, retrySources } from './intake';
 
 export function createApp(store: LessonStore) {
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '12mb' }));
+  app.use(express.json({ limit: '32mb' }));
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', milestone: 1 }));
+  let capturing = false;
+  app.get('/api/source-bundles', (_req, res) => res.json(store.listBundles()));
+  app.post('/api/source-bundles', async (req, res) => {
+    if (capturing) throw new StoreError('Another source capture is still running. Try again when it finishes.', 409);
+    capturing = true;
+    try {
+      const { bundle, blobs } = await prepareSources(req.body); store.saveBundle(bundle, blobs);
+      res.status(201).json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
+    } finally { capturing = false; }
+  });
+  app.get('/api/source-bundles/:id', (req, res) => {
+    const bundle = store.getBundle(req.params.id);
+    if (!bundle) throw new StoreError('Source collection not found.', 404);
+    res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
+  });
+  app.post('/api/source-bundles/:id/retry', async (req, res) => {
+    if (capturing) throw new StoreError('Another source capture is still running. Try again when it finishes.', 409);
+    const previous = store.getBundle(req.params.id);
+    if (!previous) throw new StoreError('Source collection not found.', 404);
+    capturing = true;
+    try {
+      const { bundle, blobs } = await retrySources(previous); store.saveBundle(bundle, blobs);
+      res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
+    } finally { capturing = false; }
+  });
+  app.get('/api/source-assets/:id', (req, res) => {
+    if (!/^[a-f0-9]{64}$/.test(req.params.id)) throw new StoreError('Image not found.', 404);
+    const asset = store.getAsset(req.params.id);
+    if (!asset) throw new StoreError('Image not found.', 404);
+    res.setHeader('Content-Type', asset.type); res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    if (asset.type === 'image/svg+xml') res.setHeader('Content-Disposition', 'attachment; filename="source.svg"');
+    res.send(Buffer.from(asset.bytes));
+  });
   app.get('/api/lessons', (_req, res) => res.json(store.list()));
   app.post('/api/lessons', (req, res) => {
     const lesson = parseLesson(req.body);
@@ -39,13 +74,13 @@ export function createApp(store: LessonStore) {
   app.use(express.static(resolve('dist')));
   const onError: ErrorRequestHandler = (error, _req, res, _next) => {
     if (error instanceof ZodError) {
-      res.status(400).json({ error: 'The lesson could not be imported.', details: error.issues.map(issue => (issue.path.join('.') || 'Lesson') + ': ' + issue.message).slice(0, 8) });
+      res.status(400).json({ error: 'Check the supplied content.', details: error.issues.map(issue => (issue.path.join('.') || 'Content') + ': ' + issue.message).slice(0, 8) });
     } else if (error instanceof StoreError) {
       res.status(error.status).json({ error: error.message });
     } else if (error.type === 'entity.parse.failed') {
       res.status(400).json({ error: 'This file is not valid JSON.' });
     } else if (error.type === 'entity.too.large') {
-      res.status(413).json({ error: 'This lesson is larger than the 12 MB import limit.' });
+      res.status(413).json({ error: 'This request is larger than the 32 MB limit. Use fewer or smaller images.' });
     } else {
       console.error(error);
       res.status(500).json({ error: 'Could not complete the request. Check the local server and try again.' });

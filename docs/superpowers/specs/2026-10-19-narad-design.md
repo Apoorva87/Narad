@@ -52,3 +52,8 @@ Source coverage and mathematical fidelity; genuinely natural spoken scripts; can
 
 ## Non-goals
 Full process orchestration platform, multi-user deployment, voice cloning studio, automatic publication, and claiming model output is infallible.
+
+
+## Confirmed feedback — source intake and identity (2026-10-19)
+
+Narad’s logo should reference Narada from Hindu mythology; initial implementation uses a simplified veena motif. A new lesson can begin with images, plain text ideas, multiple article links, or a mixture. Preserve every original figure, plot, equation, and factual table in detailed learning material. Additional explanatory diagrams may be generated when useful, with explicit teaching provenance; they supplement the original source visuals. Source intake gets its own reviewable checkpoint within Part 2.

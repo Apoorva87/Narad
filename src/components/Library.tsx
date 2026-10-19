@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { Search, ArrowUpRight, BookOpen, FilePlus2, Layers3 } from 'lucide-react';
 import type { LessonSummary } from '../../shared/lesson';
 import { modeLabels } from '../../shared/lesson';
+import type { BundleSummary } from '../../shared/sources';
 
-export function Library({ lessons, onOpen, onImport }: { lessons: LessonSummary[]; onOpen: (id: string) => void; onImport: () => void }) {
+export function Library({ lessons, bundles, onOpen, onBundle, onImport }: { lessons: LessonSummary[]; bundles: BundleSummary[]; onOpen: (id: string) => void; onBundle: (id: string) => void; onImport: () => void }) {
   const [query, setQuery] = useState('');
   const filtered = lessons.filter(lesson => (lesson.title + ' ' + lesson.description + ' ' + lesson.topic).toLowerCase().includes(query.toLowerCase()));
   return <div className="library-view">
     <div className="library-heading"><div><p className="intro-label">A little curiosity, a deeper understanding.</p><h1>Your learning library</h1><p className="page-description">Keep the ideas. Understand the details. Go at your own pace.</p></div>
       <button className="primary-button" onClick={onImport}><FilePlus2 size={17} />Add a lesson</button></div>
+    {bundles.length > 0 && <section className="source-collection-list" aria-label="Saved source collections"><div className="source-collection-heading"><h2>Ideas taking shape</h2><span>Sources saved · awaiting lesson preparation</span></div><div className="source-card-grid">{bundles.filter(bundle => bundle.title.toLowerCase().includes(query.toLowerCase())).map(bundle => <button className="source-card" key={bundle.id} onClick={() => onBundle(bundle.id)}><span className="source-card-icon"><FilePlus2 size={23} /></span><span><strong>{bundle.title}</strong><small>{bundle.sourceCount} sources · {bundle.visualCount} saved visuals</small><em className={bundle.warningCount ? 'needs-review' : ''}>{bundle.warningCount ? bundle.warningCount + ' capture issues to review' : 'Review sources'}</em></span><ArrowUpRight size={18} /></button>)}</div></section>}
     <div className="library-tools"><div className="collection-label"><BookOpen size={18} /><h2>All analyses</h2><span className="count">{lessons.length}</span></div>
       <label className="search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a topic or lesson…" aria-label="Search lessons" /></label></div>
     <div className="lesson-grid">
@@ -26,6 +28,6 @@ export function Library({ lessons, onOpen, onImport }: { lessons: LessonSummary[
       </button>)}
     </div>
     {!filtered.length && <div className="empty-state"><Search size={26} /><h3>{query ? 'No matching lessons' : 'Your next idea belongs here'}</h3><p>{query ? 'Try a different topic or clear your search.' : 'Add a prepared lesson to start your library.'}</p>{query && <button className="secondary-button" onClick={() => setQuery('')}>Clear search</button>}</div>}
-    <div className="library-footnote"><span className="small-mark">N</span><p>{lessons.some(lesson => lesson.isSample) ? 'The sample lessons are original teaching notes, with worked mathematics and diagrams. Open one to explore the reader.' : 'Your lessons and reading positions are saved on this Mac.'}</p></div>
+    <div className="library-footnote"><img className="small-mark" src="/narad-mark.svg" alt="" /><p>{lessons.some(lesson => lesson.isSample) ? 'The sample lessons are original teaching notes, with worked mathematics and diagrams. Open one to explore the reader.' : 'Your lessons and reading positions are saved on this Mac.'}</p></div>
   </div>;
 }

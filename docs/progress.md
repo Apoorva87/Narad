@@ -25,3 +25,22 @@ Pre-flight: shared Lesson contract feeds SQLite storage and reader. Only availab
 - Live preview: http://127.0.0.1:5178/ (API 4318).
 
 **Checkpoint:** Part 1 ready for user feedback. Do not begin Part 2 until feedback is received.
+
+
+## Part 2A — feedback incorporated
+
+User requested a mythology-inspired Narad mark, mixed images/text/links as lesson inputs, and preservation of all source plots and figures. This authorizes the source-intake portion of Part 2.
+
+- Replaced the lettermark with a veena-inspired SVG logo and favicon.
+- Added mixed-input composer while retaining prepared-lesson JSON import.
+- Added persisted source collections, original snapshots, content-addressed image bytes, ordered preview, visual inventory, enlargement, original downloads, and retry/refresh.
+- Source collections are explicitly labeled as captured material, not generated lessons. Agent generation, OCR, PDF ingestion, additional tutor diagrams, narration, and interactive tutoring remain subsequent work.
+- Independent review caught headerless tables disappearing, superscript/subscript and MathJax loss, transformed originals, and AVIF metadata naming. Added regression coverage and corrected each.
+- Browser inspection found two inline equations inside code-styled prose: both now render as equations. Browser test also caught invalid nested modal markup; corrected with a portal and console-error regression assertion.
+- Actual supplied Jalapeño article: 39 figures + 35 inline SVG equations/diagrams = 74 saved and displayed visuals, all decoded successfully; 7 tables. Desktop and 390px mobile preview fit the viewport.
+- Known boundaries: static HTML extraction; unsupported embedded/interactive content and merged tables need source review. Captured content is not independently fact-checked. Original snapshots remain local, not committed.
+
+- Final verification: 33 unit/integration tests and 9 browser tests pass; TypeScript and production build pass. Production dependency audit: zero vulnerabilities. Existing non-blocking math/Markdown bundle-size advisory remains.
+- Screenshots: artifacts/add-lesson.png, source-preview.png, preserved-figure.png, preserved-figure-mobile.png, library-with-sources.png.
+
+**Checkpoint:** show Part 2A logo/intake/source preview for feedback before continuing agent-generated tutoring.
