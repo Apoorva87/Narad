@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440" role="img" aria-labelledby="title desc">
+<title id="title">One gradient descent step on f(x) = x squared</title><desc id="desc">The point moves from x equals 3 with loss 9 to x equals 2.4 with loss 5.76, towards the minimum at zero.</desc>
+<rect width="960" height="440" rx="16" fill="#f4f7fc"/>
+<g font-family="Arial,sans-serif"><g stroke="#dce4f0" stroke-width="1"><path d="M100 130H570M100 230H570M100 330H570"/></g><path d="M100 60V350H590" fill="none" stroke="#7b8eaa" stroke-width="2"/>
+<path d="M100 350Q325 350 550 80" fill="none" stroke="#244fc5" stroke-width="4"/>
+<path d="M550 80V350M460 177.2V350" fill="none" stroke="#9aaec9" stroke-dasharray="6 6"/>
+<circle cx="550" cy="80" r="8" fill="#244fc5"/><circle cx="460" cy="177.2" r="8" fill="#19816e"/>
+<path d="M537 95L475 162M478 146L475 162L492 159" fill="none" stroke="#19816e" stroke-width="3" stroke-linejoin="round"/>
+<g fill="#53657c" font-size="18"><text x="95" y="378">0</text><text x="445" y="378">2.4</text><text x="544" y="378">3</text><text x="605" y="356">x</text><text x="55" y="85">9</text><text x="25" y="182">5.76</text><text x="104" y="42">f(x) = x²</text></g>
+<rect x="650" y="80" width="260" height="240" rx="14" fill="#fff" stroke="#d4deef"/><text x="675" y="120" font-size="20" fill="#18314c" font-weight="700">A small downhill step</text><g font-size="18" fill="#53657c"><text x="675" y="162">Start: x = 3</text><text x="675" y="199">Slope: 2x = 6</text><text x="675" y="236">Step size: 0.1 × 6 = 0.6</text><text x="675" y="280" fill="#19816e" font-weight="700">Next: x = 2.4</text></g><text x="100" y="419" font-size="17" fill="#53657c">Illustration of the quadratic and one update; the horizontal axis begins at the minimum.</text></g></svg>

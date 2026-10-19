@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+<title id="title">Follow 10,000 components through an inspection</title><desc id="desc">100 defective components produce 90 flags. 9,900 good components produce 495 false flags. Only 90 of the 585 flagged components are defective.</desc>
+<rect width="960" height="420" rx="16" fill="#f4f7fc"/>
+<g fill="none" stroke="#b9c9e8" stroke-width="2"><path d="M230 188C290 188 285 105 345 105"/><path d="M230 188C290 188 285 285 345 285"/><path d="M550 105H620"/><path d="M550 285H620"/></g>
+<g font-family="Arial,sans-serif"><rect x="40" y="140" width="190" height="96" rx="12" fill="#fff" stroke="#d4deef"/><text x="62" y="178" font-size="28" font-weight="700" fill="#18314c">10,000</text><text x="62" y="207" font-size="17" fill="#53657c">components</text>
+<rect x="345" y="60" width="205" height="90" rx="12" fill="#e3ebff"/><text x="366" y="98" font-size="25" font-weight="700" fill="#244fc5">100 defective</text><text x="366" y="126" font-size="17" fill="#415a8a">1% of the batch</text>
+<rect x="345" y="240" width="205" height="90" rx="12" fill="#e7eef5"/><text x="366" y="278" font-size="25" font-weight="700" fill="#34516d">9,900 good</text><text x="366" y="306" font-size="17" fill="#53657c">99% of the batch</text>
+<rect x="620" y="60" width="285" height="90" rx="12" fill="#244fc5"/><text x="642" y="98" font-size="25" font-weight="700" fill="#fff">90 correctly flagged</text><text x="642" y="126" font-size="17" fill="#e5edff">90% detection rate</text>
+<rect x="620" y="240" width="285" height="90" rx="12" fill="#fff" stroke="#a5b6ce"/><text x="642" y="278" font-size="25" font-weight="700" fill="#34516d">495 falsely flagged</text><text x="642" y="306" font-size="17" fill="#53657c">5% false-positive rate</text>
+<text x="40" y="385" font-size="19" fill="#415a8a">Among all 585 flags, 90 are genuine: about 15.4%.</text></g></svg>

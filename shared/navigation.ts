@@ -1,0 +1,11 @@
+import type { Lesson, LessonBlock, Mode, Section } from './lesson';
+export type LocatedBlock = { block: LessonBlock; section: Section; sectionIndex: number };
+export function flattenBlocks(lesson: Lesson, mode: Mode): LocatedBlock[] {
+  return lesson.modes[mode]?.sections.flatMap((section, sectionIndex) =>
+    section.blocks.map(block => ({ block, section, sectionIndex }))) ?? [];
+}
+export function moveBlock(lesson: Lesson, mode: Mode, blockId: string, offset: number): LocatedBlock | undefined {
+  const blocks = flattenBlocks(lesson, mode);
+  const index = Math.max(0, blocks.findIndex(item => item.block.id === blockId));
+  return blocks[Math.max(0, Math.min(blocks.length - 1, index + offset))];
+}

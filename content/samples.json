@@ -1,0 +1,758 @@
+[
+  {
+    "version": 1,
+    "id": "bayesian-reasoning",
+    "title": "How evidence changes your mind",
+    "description": "Build an intuition for Bayes’ rule, then follow the numbers through a surprisingly revealing inspection.",
+    "topic": "Probability",
+    "createdAt": "2026-10-19T12:00:00.000Z",
+    "isSample": true,
+    "familiarity": "foundational",
+    "assets": [
+      {
+        "id": "bayes-tree",
+        "src": "/assets/bayes-tree.svg",
+        "alt": "A tree showing 10,000 components splitting into 100 defective and 9,900 good components, producing 90 true flags and 495 false flags.",
+        "caption": "Expected counts for the assumed rates. The larger good-component group produces more flags.",
+        "provenance": "teaching"
+      }
+    ],
+    "modes": {
+      "walkthrough": {
+        "title": "Detailed walkthrough",
+        "sections": [
+          {
+            "id": "starting-point",
+            "title": "Start with what you already know",
+            "description": "A flag is evidence, not a verdict.",
+            "blocks": [
+              {
+                "id": "b-intro",
+                "kind": "text",
+                "markdown": "Imagine a factory inspecting components. An automated inspection flags a component as possibly defective. **How likely is it to actually be defective?** That is different from asking how often the inspection catches a defective component.",
+                "spokenText": "Imagine a factory inspecting components. An automated inspection flags a component as possibly defective. How likely is it to actually be defective? That's different from asking how often the inspection catches a defective component.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "The question"
+                  }
+                ]
+              },
+              {
+                "id": "b-prior",
+                "kind": "text",
+                "markdown": "Bayesian reasoning combines a **prior probability**—what you know before the new evidence—with how likely that evidence would be under different possibilities. The result is the **posterior probability**: your updated probability after observing the evidence.",
+                "spokenText": "Bayesian reasoning starts with a prior probability: what you know before the evidence. It accounts for how likely that evidence is under different possibilities. The result is the posterior probability, your updated belief.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "The question"
+                  }
+                ]
+              },
+              {
+                "id": "b-language",
+                "kind": "callout",
+                "markdown": "Think of the prior as your starting point, not a stubborn opinion. New evidence can move it substantially. But evidence needs context: a rare problem can still be rare among flagged items when false alarms are common enough.",
+                "spokenText": "Think of the prior as your starting point, not a stubborn opinion. Evidence can change it substantially. But a rare problem may still be rare among flagged items when false alarms are common enough.",
+                "origin": "teaching",
+                "references": [],
+                "title": "The intuition to keep"
+              }
+            ]
+          },
+          {
+            "id": "bayes-rule",
+            "title": "Read the equation, one term at a time",
+            "description": "Keep the two conditional probabilities distinct.",
+            "blocks": [
+              {
+                "id": "b-rule",
+                "kind": "equation",
+                "markdown": "Let $D$ mean “defective” and $F$ mean “flagged.” Provided $P(F)>0$, Bayes’ rule gives the probability of a defect after a flag.",
+                "spokenText": "Let D mean defective and F mean flagged. Provided the probability of a flag is greater than zero, Bayes' rule says: the probability of a defect given a flag equals the probability of a flag given a defect, times the prior probability of a defect, divided by the overall probability of a flag.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Bayes' rule"
+                  }
+                ],
+                "latex": "P(D\\mid F)=\\frac{P(F\\mid D)\\,P(D)}{P(F)}"
+              },
+              {
+                "id": "b-terms",
+                "kind": "text",
+                "markdown": "- $P(D)$ is the **prior**: the defect rate before inspecting this component.\n- $P(F\\mid D)$ is the **likelihood** of a flag if the component is defective.\n- $P(F)$ is the probability of a flag across **all** components.\n- $P(D\\mid F)$ is the **posterior**: the probability we want.",
+                "spokenText": "The probability of D is the prior defect rate. The probability of F given D is how often a defective component is flagged. The probability of F is the flag rate across all components. The probability of D given F is the posterior: how likely a flagged component is to be defective.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Bayes' rule"
+                  }
+                ]
+              },
+              {
+                "id": "b-denominator",
+                "kind": "equation",
+                "markdown": "A flag can come from a defective component or a good one. Because these cases are mutually exclusive and exhaustive, add their contributions. Here, $\\neg D$ means “not defective.”",
+                "spokenText": "A flag can come from a defective component or a good one. Those possibilities don't overlap, and together they cover all components. Add the detection rate times the defect rate, and the false-positive rate times the good-component rate.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Bayes' rule"
+                  }
+                ],
+                "latex": "P(F)=P(F\\mid D)P(D)+P(F\\mid\\neg D)P(\\neg D)"
+              },
+              {
+                "id": "b-direction",
+                "kind": "callout",
+                "markdown": "**The condition changes the group you are looking at.** $P(F\\mid D)$ starts with defective components and asks how many are flagged. $P(D\\mid F)$ starts with flagged components and asks how many are defective. Reversing the condition changes the denominator.",
+                "spokenText": "The condition changes which group you are looking at. Flags given defects starts with defective components. Defects given flags starts with flagged components. Reversing the condition changes the denominator.",
+                "origin": "teaching",
+                "references": [],
+                "title": "Why reversing the condition changes the answer"
+              }
+            ]
+          },
+          {
+            "id": "worked-example",
+            "title": "Make the probabilities visible",
+            "description": "Follow a batch of 10,000 components.",
+            "blocks": [
+              {
+                "id": "b-assumptions",
+                "kind": "text",
+                "markdown": "Suppose **1%** of components are defective. The inspection flags **90%** of defective components and incorrectly flags **5%** of good components. These are assumed rates for this teaching example, not measurements from a real factory.",
+                "spokenText": "Suppose one percent of components are defective. Inspection catches ninety percent of defects and falsely flags five percent of good components. These are assumed rates for a teaching example, not real factory measurements.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Worked example"
+                  }
+                ]
+              },
+              {
+                "id": "b-counts",
+                "kind": "text",
+                "markdown": "In a hypothetical batch of **10,000** components, the expected counts are:\n\n| Actual condition | Components | Flagged | Not flagged |\n| --- | ---: | ---: | ---: |\n| Defective | 100 | 90 | 10 |\n| Good | 9,900 | 495 | 9,405 |\n| **Total** | **10,000** | **585** | **9,415** |\n\nThese are expected counts under the assumed rates; a real batch can vary.",
+                "spokenText": "In ten thousand components, we expect one hundred defects and nine thousand nine hundred good components. Ninety defects are flagged and ten are missed. Four hundred ninety-five good components are falsely flagged, while nine thousand four hundred five pass. There are five hundred eighty-five flags altogether. Actual batches can vary.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Worked example"
+                  }
+                ]
+              },
+              {
+                "id": "b-figure",
+                "kind": "figure",
+                "markdown": "Notice how the large group of good components produces more flags, even with a much smaller flag rate.",
+                "spokenText": "Five percent of nine thousand nine hundred is four hundred ninety-five. That's more than ninety percent of one hundred, which is ninety.",
+                "origin": "teaching",
+                "references": [],
+                "assetId": "bayes-tree"
+              },
+              {
+                "id": "b-result",
+                "kind": "equation",
+                "markdown": "Of the **585** flagged components, **90** are defective. The posterior is therefore about **15.4%**, despite a 90% detection rate.",
+                "spokenText": "Of five hundred eighty-five flagged components, ninety are defective. Ninety divided by five hundred eighty-five is approximately fifteen point four percent, even though the detection rate is ninety percent.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Worked example"
+                  }
+                ],
+                "latex": "P(D\\mid F)=\\frac{0.90\\times0.01}{0.90\\times0.01+0.05\\times0.99}=\\frac{90}{585}\\approx0.154"
+              }
+            ]
+          },
+          {
+            "id": "interpretation",
+            "title": "Understand what changed",
+            "description": "A positive result matters, even when it is not conclusive.",
+            "blocks": [
+              {
+                "id": "b-update",
+                "kind": "text",
+                "markdown": "Before inspection, the defect probability was **1%**. After a flag, it is about **15.4%**. The inspection has increased the probability substantially; it simply has not made a defect certain. Confusing “informative” with “conclusive” hides this distinction.",
+                "spokenText": "Before inspection, the probability was one percent. After a flag, it rises to about fifteen point four percent. The flag is informative: it changes our estimate substantially. Informative does not mean conclusive.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Interpretation"
+                  }
+                ]
+              },
+              {
+                "id": "b-base-rate",
+                "kind": "text",
+                "markdown": "If the underlying defect rate changes while the detection and false-positive rates stay the same, the posterior changes too. This is why a result cannot be interpreted using a detection rate alone.",
+                "spokenText": "If the underlying defect rate changes while the detection and false-positive rates stay the same, the posterior changes too. A detection rate alone cannot tell the whole story.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Interpretation"
+                  }
+                ]
+              },
+              {
+                "id": "b-check",
+                "kind": "callout",
+                "markdown": "Try explaining the answer without the equation: **“Among all the flagged components, what fraction are genuinely defective?”** If you can identify both numbers in that sentence, you understand the denominator.",
+                "spokenText": "Among all flagged components, what fraction are genuinely defective? If you can identify both numbers in that sentence, you understand the denominator.",
+                "origin": "teaching",
+                "references": [],
+                "title": "A quick understanding check"
+              }
+            ]
+          },
+          {
+            "id": "limits",
+            "title": "Keep the assumptions with the answer",
+            "description": "The calculation is only as applicable as its inputs.",
+            "blocks": [
+              {
+                "id": "b-limits",
+                "kind": "text",
+                "markdown": "The calculation assumes the stated rates apply to the population being inspected. Different equipment, materials, or inspection conditions can change those rates. Bayes’ rule is an identity; the reliability of a particular estimate still depends on the inputs.",
+                "spokenText": "This assumes the rates apply to the inspected population. Different equipment, materials, or conditions can change them. Bayes' rule is an identity, but the estimate depends on the inputs.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Assumptions and limits"
+                  }
+                ]
+              },
+              {
+                "id": "b-repeat",
+                "kind": "text",
+                "markdown": "For repeated inspections, **do not multiply likelihoods without checking conditional independence**. Two inspections that share the same failure mode may provide much less new information than two independent inspections.",
+                "spokenText": "For repeated inspections, don't simply multiply likelihoods. First check conditional independence. Inspections sharing a failure mode may provide much less new information than independent inspections.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Assumptions and limits"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "summary": {
+        "title": "Quick summary",
+        "sections": [
+          {
+            "id": "brief",
+            "title": "The source in a few lines",
+            "blocks": [
+              {
+                "id": "b-summary",
+                "kind": "text",
+                "markdown": "This teaching note introduces Bayes’ rule through component inspection. A 1% defect rate, 90% detection rate, and 5% false-positive rate imply that only about **15.4% of flagged components are defective**. The distinction is between detecting a defect and interpreting a flag. The calculation depends on the rates applying to the inspected population.",
+                "spokenText": "This note explains Bayes' rule through inspection. With a one percent defect rate, ninety percent detection, and five percent false positives, about fifteen point four percent of flagged components are defective. The rates must apply to the inspected population.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Worked example"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "takeaway",
+            "title": "The idea to take with you",
+            "blocks": [
+              {
+                "id": "b-summary-takeaway",
+                "kind": "text",
+                "markdown": "**Evidence updates a starting probability; it does not replace the need for context.** Ask which group the probability is conditioned on, and count all the ways the observed evidence could arise.",
+                "spokenText": "Evidence updates a starting probability. Ask which group the probability is conditioned on, and count all the ways the evidence could arise.",
+                "origin": "teaching",
+                "references": []
+              }
+            ]
+          }
+        ]
+      },
+      "dialogue": {
+        "title": "Tutor dialogue",
+        "sections": [
+          {
+            "id": "conversation",
+            "title": "“Ninety percent” sounds convincing",
+            "blocks": [
+              {
+                "id": "bd-1",
+                "kind": "dialogue",
+                "markdown": "If an inspection catches 90% of defects, shouldn’t a flagged component have a 90% chance of being defective?",
+                "spokenText": "If inspection catches ninety percent of defects, shouldn't a flagged component have a ninety percent chance of being defective?",
+                "origin": "teaching",
+                "references": [],
+                "speaker": "Maya",
+                "role": "host"
+              },
+              {
+                "id": "bd-2",
+                "kind": "dialogue",
+                "markdown": "That is the tempting reversal. “Catches 90% of defects” starts with the defective group. Your question starts with the flagged group. We need to know how many good components get flagged too.",
+                "spokenText": "That's the tempting reversal. Catches ninety percent of defects starts with the defective group. Your question starts with flagged components. We also need to count good components that get flagged.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Bayes' rule"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              },
+              {
+                "id": "bd-3",
+                "kind": "dialogue",
+                "markdown": "So the size of each group matters, before we even apply the inspection rates?",
+                "spokenText": "So the size of each group matters before we apply the inspection rates?",
+                "origin": "teaching",
+                "references": [],
+                "speaker": "Maya",
+                "role": "host"
+              },
+              {
+                "id": "bd-4",
+                "kind": "dialogue",
+                "markdown": "Exactly. In 10,000 components with a 1% defect rate, there are 100 defects and 9,900 good components. We expect 90 true flags, but also 495 false flags.",
+                "spokenText": "Exactly. Out of ten thousand components, one hundred are defective. We expect ninety true flags, but also four hundred ninety-five false flags.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Worked example"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              },
+              {
+                "id": "bd-figure",
+                "kind": "figure",
+                "markdown": "Follow the two paths to see where the flags come from.",
+                "spokenText": "Follow the two paths. The good-component group is much larger.",
+                "origin": "teaching",
+                "references": [],
+                "assetId": "bayes-tree"
+              }
+            ]
+          },
+          {
+            "id": "conversation-answer",
+            "title": "Count the flags, then update the belief",
+            "blocks": [
+              {
+                "id": "bd-5",
+                "kind": "dialogue",
+                "markdown": "Then the denominator is all 585 flags, not all the components?",
+                "spokenText": "Then the denominator is all five hundred eighty-five flags, not all components?",
+                "origin": "teaching",
+                "references": [],
+                "speaker": "Maya",
+                "role": "host"
+              },
+              {
+                "id": "bd-6",
+                "kind": "dialogue",
+                "markdown": "Yes. Ninety divided by 585 is about 15.4%. That is a substantial increase from the original 1%. The flag tells us something useful without settling the question.",
+                "spokenText": "Yes. Ninety divided by five hundred eighty-five is about fifteen point four percent. That's a substantial increase from one percent. Useful, but not conclusive.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Interpretation"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              },
+              {
+                "id": "bd-7",
+                "kind": "dialogue",
+                "markdown": "These are assumed rates. If the population changes, update the prior. For repeated inspections, check conditional independence before multiplying likelihoods.",
+                "spokenText": "These are assumed rates. Update the prior if the population changes. For repeated inspections, check conditional independence before multiplying likelihoods.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Assumptions and limits"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "sources": [
+      {
+        "id": "original",
+        "title": "Bayesian reasoning: a component-inspection example",
+        "kind": "note",
+        "locators": [
+          "The question",
+          "Bayes' rule",
+          "Worked example",
+          "Interpretation",
+          "Assumptions and limits"
+        ],
+        "content": "# Original teaching note\n\nAuthored for the Narad reader demonstration. No external paper is being reproduced.\n\n## Start with what you already know\n\nImagine a factory inspecting components. An automated inspection flags a component as possibly defective. **How likely is it to actually be defective?** That is different from asking how often the inspection catches a defective component.\n\nBayesian reasoning combines a **prior probability**—what you know before the new evidence—with how likely that evidence would be under different possibilities. The result is the **posterior probability**: your updated probability after observing the evidence.\n\n## Read the equation, one term at a time\n\n$$\nP(D\\mid F)=\\frac{P(F\\mid D)\\,P(D)}{P(F)}\n$$\n\nLet $D$ mean “defective” and $F$ mean “flagged.” Provided $P(F)>0$, Bayes’ rule gives the probability of a defect after a flag.\n\n- $P(D)$ is the **prior**: the defect rate before inspecting this component.\n- $P(F\\mid D)$ is the **likelihood** of a flag if the component is defective.\n- $P(F)$ is the probability of a flag across **all** components.\n- $P(D\\mid F)$ is the **posterior**: the probability we want.\n\n$$\nP(F)=P(F\\mid D)P(D)+P(F\\mid\\neg D)P(\\neg D)\n$$\n\nA flag can come from a defective component or a good one. Because these cases are mutually exclusive and exhaustive, add their contributions. Here, $\\neg D$ means “not defective.”\n\n## Make the probabilities visible\n\nSuppose **1%** of components are defective. The inspection flags **90%** of defective components and incorrectly flags **5%** of good components. These are assumed rates for this teaching example, not measurements from a real factory.\n\nIn a hypothetical batch of **10,000** components, the expected counts are:\n\n| Actual condition | Components | Flagged | Not flagged |\n| --- | ---: | ---: | ---: |\n| Defective | 100 | 90 | 10 |\n| Good | 9,900 | 495 | 9,405 |\n| **Total** | **10,000** | **585** | **9,415** |\n\nThese are expected counts under the assumed rates; a real batch can vary.\n\n$$\nP(D\\mid F)=\\frac{0.90\\times0.01}{0.90\\times0.01+0.05\\times0.99}=\\frac{90}{585}\\approx0.154\n$$\n\nOf the **585** flagged components, **90** are defective. The posterior is therefore about **15.4%**, despite a 90% detection rate.\n\n## Understand what changed\n\nBefore inspection, the defect probability was **1%**. After a flag, it is about **15.4%**. The inspection has increased the probability substantially; it simply has not made a defect certain. Confusing “informative” with “conclusive” hides this distinction.\n\nIf the underlying defect rate changes while the detection and false-positive rates stay the same, the posterior changes too. This is why a result cannot be interpreted using a detection rate alone.\n\n## Keep the assumptions with the answer\n\nThe calculation assumes the stated rates apply to the population being inspected. Different equipment, materials, or inspection conditions can change those rates. Bayes’ rule is an identity; the reliability of a particular estimate still depends on the inputs.\n\nFor repeated inspections, **do not multiply likelihoods without checking conditional independence**. Two inspections that share the same failure mode may provide much less new information than two independent inspections."
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "id": "gradient-descent",
+    "title": "What a gradient actually tells you",
+    "description": "See why a small downhill step works, what the learning rate changes, and where the intuition stops.",
+    "topic": "Machine learning",
+    "createdAt": "2026-10-18T12:00:00.000Z",
+    "isSample": true,
+    "familiarity": "foundational",
+    "assets": [
+      {
+        "id": "gradient-curve",
+        "src": "/assets/gradient-curve.svg",
+        "alt": "A quadratic curve with a descent step from x equals 3 and loss 9 to x equals 2.4 and loss 5.76.",
+        "caption": "One update with learning rate 0.1 on f(x) = x². The derivative sets direction; the learning rate scales the step.",
+        "provenance": "teaching"
+      }
+    ],
+    "modes": {
+      "walkthrough": {
+        "title": "Detailed walkthrough",
+        "sections": [
+          {
+            "id": "slope",
+            "title": "A gradient tells you how the function changes",
+            "description": "Start with one variable and one curve.",
+            "blocks": [
+              {
+                "id": "g-intro",
+                "kind": "text",
+                "markdown": "Suppose we want to minimize $f(x)=x^2$. You can already see the minimum is at $x=0$. We use this simple example to understand an update rule that also works when the minimum is harder to find.",
+                "spokenText": "Suppose we want to minimize f of x equals x squared. Its minimum is at zero. We use this simple curve to understand a rule that also works when the minimum is harder to find.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Slope"
+                  }
+                ]
+              },
+              {
+                "id": "g-derivative",
+                "kind": "equation",
+                "markdown": "The derivative measures local change. At $x=3$, the slope is $6$: a small positive change in $x$ increases $f(x)$ at approximately six times that change.",
+                "spokenText": "The derivative is two x. At x equals three, the slope is six. For a small positive change in x, the function increases by approximately six times that change.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Slope"
+                  }
+                ],
+                "latex": "f'(x)=2x,\\qquad f'(3)=6"
+              },
+              {
+                "id": "g-tangent",
+                "kind": "callout",
+                "markdown": "“Local” matters. A derivative describes the tangent at one point; it does not promise that the same slope holds over a large jump. This is why the size of an optimization step matters.",
+                "spokenText": "Local matters. A derivative describes the tangent at one point. It doesn't promise that the same slope holds over a large jump.",
+                "origin": "teaching",
+                "references": [],
+                "title": "A slope is a local description"
+              }
+            ]
+          },
+          {
+            "id": "update",
+            "title": "Take a controlled step downhill",
+            "description": "The direction and the distance do different jobs.",
+            "blocks": [
+              {
+                "id": "g-rule",
+                "kind": "equation",
+                "markdown": "Gradient descent subtracts the derivative multiplied by a positive learning rate $\\eta$. The minus sign chooses the downhill direction locally; the learning rate controls the step length.",
+                "spokenText": "Gradient descent subtracts the learning rate times the derivative. The minus sign chooses the local downhill direction. The positive learning rate controls how far we move.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ],
+                "latex": "x_{t+1}=x_t-\\eta f'(x_t)"
+              },
+              {
+                "id": "g-step",
+                "kind": "equation",
+                "markdown": "Starting at $x_0=3$ and choosing $\\eta=0.1$, the step is $0.1\\times6=0.6$. The new point is $2.4$, and the loss falls from $9$ to $5.76$.",
+                "spokenText": "Starting at three with learning rate zero point one, the step is zero point six. Subtract that from three to get two point four. The loss drops from nine to five point seven six.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ],
+                "latex": "x_1=3-0.1(6)=2.4,\\qquad f(x_1)=2.4^2=5.76"
+              },
+              {
+                "id": "g-figure",
+                "kind": "figure",
+                "markdown": "The green step moves left and down along the curve toward the minimum. It does not jump all the way to the minimum.",
+                "spokenText": "The green step moves left and down toward the minimum. It doesn't jump all the way to the minimum.",
+                "origin": "teaching",
+                "references": [],
+                "assetId": "gradient-curve"
+              }
+            ]
+          },
+          {
+            "id": "rate",
+            "title": "What if the step is too large?",
+            "description": "A correct direction does not guarantee a useful step.",
+            "blocks": [
+              {
+                "id": "g-factor",
+                "kind": "equation",
+                "markdown": "For this particular quadratic, substituting $f'(x)=2x$ gives a simple recurrence. Each step multiplies $x$ by $1-2\\eta$.",
+                "spokenText": "For this quadratic, each step multiplies x by one minus twice the learning rate.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ],
+                "latex": "x_{t+1}=(1-2\\eta)x_t"
+              },
+              {
+                "id": "g-convergence",
+                "kind": "text",
+                "markdown": "For a constant learning rate and any starting point, convergence to zero is guaranteed when $|1-2\\eta|<1$, equivalently **$0<\\eta<1$**. At $\\eta=0.5$, the next point is exactly zero. At $\\eta=1$, a nonzero starting point oscillates between opposite signs without shrinking.",
+                "spokenText": "For this quadratic, a constant learning rate strictly between zero and one guarantees convergence from any starting point. At one half, the next point is exactly zero. At one, a nonzero starting point oscillates without shrinking.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ]
+              },
+              {
+                "id": "g-general",
+                "kind": "text",
+                "markdown": "That interval is specific to $f(x)=x^2$. Other functions have different curvature and may require different step sizes. A large step can move beyond the region where the local slope is a useful guide.",
+                "spokenText": "That interval is specific to x squared. Other functions have different curvature and may need different step sizes. A large step can go beyond the region where the local slope is useful.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "many-variables",
+            "title": "Extend the idea to many variables",
+            "description": "The gradient collects all the partial derivatives.",
+            "blocks": [
+              {
+                "id": "g-vector",
+                "kind": "equation",
+                "markdown": "For a differentiable function of several parameters, the gradient is the vector of partial derivatives. Under the Euclidean norm, the negative gradient is the direction of steepest local decrease when the gradient is nonzero.",
+                "spokenText": "For a differentiable function of several parameters, the gradient collects partial derivatives into a vector. With Euclidean distance and a nonzero gradient, the negative gradient points toward steepest local decrease.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Several variables"
+                  }
+                ],
+                "latex": "\\boldsymbol{\\theta}_{t+1}=\\boldsymbol{\\theta}_t-\\eta\\nabla f(\\boldsymbol{\\theta}_t)"
+              },
+              {
+                "id": "g-caveat",
+                "kind": "text",
+                "markdown": "On a general nonconvex function, this rule does **not** guarantee a global minimum. A zero gradient can occur at a minimum, a maximum, or a saddle point. The quadratic example illustrates the mechanism, not a universal convergence guarantee.",
+                "spokenText": "For a general nonconvex function, this rule does not guarantee a global minimum. A zero gradient can occur at a minimum, a maximum, or a saddle point. This example explains the mechanism, not a universal guarantee.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Several variables"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "summary": {
+        "title": "Quick summary",
+        "sections": [
+          {
+            "id": "brief",
+            "title": "The source in a few lines",
+            "blocks": [
+              {
+                "id": "g-summary",
+                "kind": "text",
+                "markdown": "Gradient descent moves against a function’s local slope. For $f(x)=x^2$, starting at $x=3$ with learning rate $0.1$ moves to $2.4$, reducing the loss from $9$ to $5.76$. The learning rate controls whether steps shrink toward the minimum or overshoot. The convergence condition for this quadratic is not a guarantee for general nonconvex functions.",
+                "spokenText": "For x squared, starting at three with learning rate zero point one moves to two point four and reduces loss from nine to five point seven six. Step size matters. The quadratic's convergence condition isn't a general guarantee.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "takeaway",
+            "title": "The idea to take with you",
+            "blocks": [
+              {
+                "id": "g-summary-takeaway",
+                "kind": "text",
+                "markdown": "**The gradient gives local direction, not a map of the whole landscape.** Pair it with a suitable step size, and keep the function’s assumptions in view.",
+                "spokenText": "The gradient gives local direction, not a map of the whole landscape. Pair it with a suitable step size and keep the assumptions in view.",
+                "origin": "teaching",
+                "references": []
+              }
+            ]
+          }
+        ]
+      },
+      "dialogue": {
+        "title": "Tutor dialogue",
+        "sections": [
+          {
+            "id": "conversation",
+            "title": "A slope suggests the next step",
+            "blocks": [
+              {
+                "id": "gd-1",
+                "kind": "dialogue",
+                "markdown": "If the gradient points uphill, why is it useful for finding a minimum?",
+                "spokenText": "If the gradient points uphill, why is it useful for finding a minimum?",
+                "origin": "teaching",
+                "references": [],
+                "speaker": "Maya",
+                "role": "host"
+              },
+              {
+                "id": "gd-2",
+                "kind": "dialogue",
+                "markdown": "Because we subtract it. For x squared at x equals 3, the slope is 6. Multiply by a learning rate of 0.1 and subtract 0.6. The next point is 2.4.",
+                "spokenText": "Because we subtract it. For x squared at three, the slope is six. Multiply by zero point one and subtract zero point six. The next point is two point four.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              },
+              {
+                "id": "gd-figure",
+                "kind": "figure",
+                "markdown": "The green arrow shows the update toward the minimum.",
+                "spokenText": "The green arrow shows the update toward the minimum.",
+                "origin": "teaching",
+                "references": [],
+                "assetId": "gradient-curve"
+              },
+              {
+                "id": "gd-3",
+                "kind": "dialogue",
+                "markdown": "Why not take a much bigger step and get there faster?",
+                "spokenText": "Why not take a much bigger step and get there faster?",
+                "origin": "teaching",
+                "references": [],
+                "speaker": "Maya",
+                "role": "host"
+              },
+              {
+                "id": "gd-4",
+                "kind": "dialogue",
+                "markdown": "The slope is local. A big step may overshoot. For this quadratic, a constant learning rate strictly between zero and one guarantees convergence. That interval changes for other functions.",
+                "spokenText": "The slope is local. A big step may overshoot. For this quadratic, a learning rate strictly between zero and one guarantees convergence. That changes for other functions.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              },
+              {
+                "id": "gd-5",
+                "kind": "dialogue",
+                "markdown": "On a general nonconvex landscape, a zero gradient need not be a minimum. It may be a maximum or a saddle point.",
+                "spokenText": "On a nonconvex landscape, a zero gradient need not be a minimum. It may be a maximum or a saddle point.",
+                "origin": "source",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Several variables"
+                  }
+                ],
+                "speaker": "Tutor",
+                "role": "expert"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "sources": [
+      {
+        "id": "original",
+        "title": "Gradient descent: one quadratic, carefully explained",
+        "kind": "note",
+        "locators": [
+          "Slope",
+          "Update rule",
+          "Learning rate",
+          "Several variables"
+        ],
+        "content": "# Original teaching note\n\nAuthored for the Narad reader demonstration. No external paper is being reproduced.\n\n## A gradient tells you how the function changes\n\nSuppose we want to minimize $f(x)=x^2$. You can already see the minimum is at $x=0$. We use this simple example to understand an update rule that also works when the minimum is harder to find.\n\n$$\nf'(x)=2x,\\qquad f'(3)=6\n$$\n\nThe derivative measures local change. At $x=3$, the slope is $6$: a small positive change in $x$ increases $f(x)$ at approximately six times that change.\n\n## Take a controlled step downhill\n\n$$\nx_{t+1}=x_t-\\eta f'(x_t)\n$$\n\nGradient descent subtracts the derivative multiplied by a positive learning rate $\\eta$. The minus sign chooses the downhill direction locally; the learning rate controls the step length.\n\n$$\nx_1=3-0.1(6)=2.4,\\qquad f(x_1)=2.4^2=5.76\n$$\n\nStarting at $x_0=3$ and choosing $\\eta=0.1$, the step is $0.1\\times6=0.6$. The new point is $2.4$, and the loss falls from $9$ to $5.76$.\n\n## What if the step is too large?\n\n$$\nx_{t+1}=(1-2\\eta)x_t\n$$\n\nFor this particular quadratic, substituting $f'(x)=2x$ gives a simple recurrence. Each step multiplies $x$ by $1-2\\eta$.\n\nFor a constant learning rate and any starting point, convergence to zero is guaranteed when $|1-2\\eta|<1$, equivalently **$0<\\eta<1$**. At $\\eta=0.5$, the next point is exactly zero. At $\\eta=1$, a nonzero starting point oscillates between opposite signs without shrinking.\n\nThat interval is specific to $f(x)=x^2$. Other functions have different curvature and may require different step sizes. A large step can move beyond the region where the local slope is a useful guide.\n\n## Extend the idea to many variables\n\n$$\n\\boldsymbol{\\theta}_{t+1}=\\boldsymbol{\\theta}_t-\\eta\\nabla f(\\boldsymbol{\\theta}_t)\n$$\n\nFor a differentiable function of several parameters, the gradient is the vector of partial derivatives. Under the Euclidean norm, the negative gradient is the direction of steepest local decrease when the gradient is nonzero.\n\nOn a general nonconvex function, this rule does **not** guarantee a global minimum. A zero gradient can occur at a minimum, a maximum, or a saddle point. The quadratic example illustrates the mechanism, not a universal convergence guarantee."
+      }
+    ]
+  }
+]
