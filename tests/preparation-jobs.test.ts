@@ -384,8 +384,10 @@ it('does not re-queue an item that was stopped while it was out of the queue',as
 it('frees the slot and marks the item failed when settings cannot be read while launching it',async()=>{
  const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
  t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');await expect.poll(()=>g.held('time')).toBe(true);
- const getSettings=t.store.getSettings.bind(t.store);let broken=true;
- t.store.getSettings=(()=>{if(broken&&new Error().stack!.includes('launch')){broken=false;throw new Error('settings unreadable')}return getSettings()}) as typeof t.store.getSettings;
+ const getSettings=t.store.getSettings.bind(t.store);let armed=false;
+ const getBundle=t.store.getBundle.bind(t.store);
+ t.store.getBundle=((id:string)=>{if(id==='space')armed=true;return getBundle(id)}) as typeof t.store.getBundle;
+ t.store.getSettings=(()=>{if(armed){armed=false;throw new Error('settings unreadable')}return getSettings()}) as typeof t.store.getSettings;
  g.release('time');await expect.poll(()=>t.job('space')?.status).toBe('failed');
  expect(t.job('space')?.error).toContain('settings unreadable');expect(t.service.busy('space')).toBe(false);expect(t.service.state().sessions).toEqual([]);
  expect(t.service.start('light','codex').status).toBe('running');await expect.poll(()=>g.held('light')).toBe(true);g.release('light');
