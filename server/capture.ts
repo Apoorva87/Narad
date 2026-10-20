@@ -72,8 +72,8 @@ export async function captureArticle(url: string, download: Download = downloadP
     }
     // Inline MathML must not split its sentence: put the marker after the enclosing block (inside list items and cells).
     const block = node.tagName === 'math' ? element.parent().closest('p, li, td, th, figure, div') : $();
-    const inside = block.length && ['li', 'td', 'th'].includes(block[0].tagName);
-    if (block.length && root.find(block).length) { if (inside) block.append(marker()); else block.after(marker()); element.remove(); }
+    const inside = block.length > 0 && ['li', 'td', 'th'].includes(block.prop('tagName')?.toLowerCase() ?? '');
+    if (block.length && block.closest(root).length) { if (inside) block.append(marker()); else block.after(marker()); element.remove(); }
     else element.replaceWith(marker());
     source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + response.url });
   });
