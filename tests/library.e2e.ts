@@ -256,3 +256,37 @@ test('presentation mode shows the credit line under the held figure', async ({ p
   await page.getByRole('button', { name: 'Present', exact: true }).click();
   await expect(page.locator('.presentation-figure .credit-line')).toContainText('From The Source Page');
 });
+
+test('presentation mode can ask the tutor about the passage it was opened on', async ({ page, request }) => {
+  const id = await copyOf(request, 'gradient-descent', 'present-ask-copy');
+  await page.route('**/api/speech', route => route.fulfill({ json: { state: 'ready', model: 'Fixture' } }));
+  await page.goto('/#lesson/' + id);
+  await page.getByRole('tab', { name: 'Detailed walkthrough' }).click();
+  await page.getByRole('button', { name: 'Set reading position at g-step', exact: true }).click();
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  const stage = page.getByRole('dialog', { name: /^Presenting/ });
+  await expect(stage.locator('.presentation-ask')).toHaveCount(0);
+  await stage.getByRole('button', { name: 'Ask tutor' }).click();
+  await expect(stage.locator('.presentation-ask').getByLabel('Question for the tutor')).toBeVisible();
+  await page.keyboard.press('Escape'); // Leaves presentation; reopening starts with the panel closed.
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  await expect(stage.locator('.presentation-ask')).toHaveCount(0);
+  await page.keyboard.press('a');
+  await expect(stage.locator('.presentation-ask')).toBeVisible();
+  const count = await stage.locator('.presentation-count').textContent();
+  // The panel stays on the passage it was opened on while the slide moves.
+  await page.keyboard.press('ArrowRight');
+  await expect(stage.locator('.presentation-count')).not.toHaveText(count!);
+  await expect(stage.locator('.presentation-ask')).toBeVisible();
+  await stage.getByRole('button', { name: 'Back to current passage' }).click();
+  await expect(stage.getByRole('button', { name: 'Back to current passage' })).toHaveCount(0);
+  // Swiping inside the panel never changes the slide.
+  const after = await stage.locator('.presentation-count').textContent();
+  await stage.locator('.presentation-ask').evaluate(panel => {
+    const make = (type: string, x: number) => new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === 'touchend' ? [] : [new Touch({ identifier: 1, target: panel, clientX: x, clientY: 200 })], changedTouches: [new Touch({ identifier: 1, target: panel, clientX: x, clientY: 200 })] });
+    panel.dispatchEvent(make('touchstart', 300)); panel.dispatchEvent(make('touchend', 50));
+  });
+  await expect(stage.locator('.presentation-count')).toHaveText(after!);
+  await page.keyboard.press('a');
+  await expect(stage.locator('.presentation-ask')).toHaveCount(0);
+});

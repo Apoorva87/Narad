@@ -1,5 +1,5 @@
-import { useEffect, useRef, type TouchEvent } from 'react';
-import { Captions, CaptionsOff, LoaderCircle, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
+import { useEffect, useRef, type ReactNode, type TouchEvent } from 'react';
+import { Captions, CaptionsOff, LoaderCircle, MessageCircleQuestion, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import type { Lesson } from '../../shared/lesson';
 import { latestFigureIndex, type LocatedBlock } from '../../shared/navigation';
 import type { useNarration } from '../hooks/useNarration';
@@ -8,9 +8,11 @@ import { CreditLine } from './CreditLine';
 import { VideoEmbed } from './VideoEmbed';
 
 /** Podcast-style view: narration plays while the most recent figure stays on screen until the next one. */
-export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit }: {
+export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit, askAt, onToggleAsk, onAskCurrent, renderThread }: {
   lesson: Lesson; blocks: LocatedBlock[]; activeIndex: number; narration: ReturnType<typeof useNarration>;
   transcript: boolean; onTranscript: () => void; onMove: (offset: number) => void; onExit: () => void;
+  /** Block the Ask tutor panel was opened on, or null when closed. Threads belong to a passage, so the panel stays on it while narration moves on. */
+  askAt: string | null; onToggleAsk: () => void; onAskCurrent: () => void; renderThread: (blockId: string) => ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const exitRef = useRef(onExit); exitRef.current = onExit;
@@ -19,6 +21,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
   const figureIndex = latestFigureIndex(blocks, activeIndex);
   const figure = figureIndex >= 0 ? blocks[figureIndex].block : undefined;
   const asset = figure?.kind === 'figure' ? lesson.assets.find(item => item.id === figure.assetId) : undefined;
+  const askIndex = askAt ? blocks.findIndex(item => item.block.id === askAt) : -1;
   const { state, server, preferences } = narration;
   const active = state.status === 'playing' || state.status === 'loading';
   const status = server?.state === 'not-installed' ? server.message : state.status === 'loading' ? (server?.state === 'loading' ? 'Loading the local voice model…' : 'Preparing narration…') : state.status === 'paused' ? 'Paused' : state.status === 'ended' ? 'End of lesson' : state.status === 'error' ? state.error : '';
@@ -41,7 +44,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
   }, []);
 
   function touchStart(event: TouchEvent) {
-    if ((event.target as HTMLElement).closest('button, select, a, .video-embed, .presentation-transcript')) { touch.current = null; return; }
+    if ((event.target as HTMLElement).closest('button, select, a, textarea, .video-embed, .presentation-transcript, .presentation-ask')) { touch.current = null; return; }
     touch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY, time: Date.now() };
   }
   function touchEnd(event: TouchEvent) {
@@ -67,6 +70,11 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
         <Markdown onVideoPlay={narration.pause} assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>
       </div>}
     </div>
+    {askIndex >= 0 && <aside className="presentation-ask" aria-label="Tutor conversation">
+      <div className="presentation-ask-head"><strong>Ask tutor</strong>{askIndex !== activeIndex && <button className="text-link" onClick={onAskCurrent}>Back to current passage</button>}</div>
+      <blockquote>{blocks[askIndex].block.markdown.slice(0, 140)}{blocks[askIndex].block.markdown.length > 140 ? '…' : ''}</blockquote>
+      {renderThread(blocks[askIndex].block.id)}
+    </aside>}
     <footer className="presentation-controls">
       <div className="presentation-progress" aria-hidden="true"><span style={{ width: ((activeIndex + 1) / blocks.length) * 100 + '%' }} /></div>
       <div className="presentation-buttons">
@@ -77,6 +85,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
         </button>
         <button className="presentation-icon" onClick={() => onMove(1)} disabled={activeIndex === blocks.length - 1} aria-label="Next passage" title="Next (→)"><SkipForward size={20} /></button>
         <div className="presentation-extra">
+          <button className="presentation-icon" onClick={onToggleAsk} aria-pressed={askIndex >= 0} aria-label="Ask tutor" title="Ask tutor (A)"><MessageCircleQuestion size={20} /></button>
           <select aria-label="Playback speed" value={preferences.rate} onChange={event => narration.updatePreferences({ ...preferences, rate: Number(event.target.value) })}>{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select>
           <button className="presentation-icon" onClick={onTranscript} aria-pressed={transcript} aria-label={transcript ? 'Hide transcript' : 'Show transcript'} title="Transcript (T)">{transcript ? <Captions size={20} /> : <CaptionsOff size={20} />}</button>
         </div>
