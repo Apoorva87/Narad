@@ -365,3 +365,29 @@ it('puts an item back in its queue place when the action run while it is out of 
  expect(t.job('space')).toMatchObject({status:'queued',queuePosition:1,queueLength:2});expect(t.progress('space').status).toBe('queued');
  expect(await t.service.whileDequeued('light',()=>'ok')).toBe('ok');expect(t.job('light')?.status).toBe('stopped');
 });
+it('restores an item by its original queue order when items ahead of it left while it was out',async()=>{
+ const g=gate();const t=await setupMany(['Time','Alpha','Space','Light'],1,g.run);
+ t.service.start('time','codex');t.service.start('alpha','codex');t.service.start('space','codex');t.service.start('light','codex');
+ await expect.poll(()=>g.held('time')).toBe(true);
+ await expect(t.service.whileDequeued('space',async()=>{g.release('time');await expect.poll(()=>g.held('alpha')).toBe(true);throw new Error('rename failed')})).rejects.toThrow('rename failed');
+ expect(t.job('space')).toMatchObject({status:'queued',queuePosition:1,queueLength:2});expect(t.job('light')).toMatchObject({status:'queued',queuePosition:2});
+ g.release('alpha');await expect.poll(()=>g.held('space')).toBe(true);expect(g.started).toEqual(['time','alpha','space']);
+ g.release('space');g.release('light');await expect.poll(()=>t.job('light')?.status).toBe('completed');
+});
+it('does not re-queue an item that was stopped while it was out of the queue',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
+ t.service.start('time','codex');t.service.start('space','codex');t.service.start('light','codex');
+ await expect(t.service.whileDequeued('space',async()=>{await t.service.stop('space');throw new Error('rename failed')})).rejects.toThrow('rename failed');
+ expect(t.job('space')?.status).toBe('stopped');expect(t.progress('space').status).toBe('stopped');expect(t.job('light')).toMatchObject({status:'queued',queuePosition:1,queueLength:1});
+ g.release('time');g.release('light');await expect.poll(()=>t.job('light')?.status).toBe('completed');expect(g.started).toEqual(['time','light']);
+});
+it('frees the slot and marks the item failed when settings cannot be read while launching it',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
+ t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');await expect.poll(()=>g.held('time')).toBe(true);
+ const getSettings=t.store.getSettings.bind(t.store);let broken=true;
+ t.store.getSettings=(()=>{if(broken&&new Error().stack!.includes('launch')){broken=false;throw new Error('settings unreadable')}return getSettings()}) as typeof t.store.getSettings;
+ g.release('time');await expect.poll(()=>t.job('space')?.status).toBe('failed');
+ expect(t.job('space')?.error).toContain('settings unreadable');expect(t.service.busy('space')).toBe(false);expect(t.service.state().sessions).toEqual([]);
+ expect(t.service.start('light','codex').status).toBe('running');await expect.poll(()=>g.held('light')).toBe(true);g.release('light');
+ await expect.poll(()=>t.job('light')?.status).toBe('completed');expect(g.started).toEqual(['time','light']);
+});
