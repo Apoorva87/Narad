@@ -36,9 +36,9 @@ export const settingsSchema = z.object({
   preparation: z.object({
     defaultProvider: z.enum(providers), codexModel: z.string().trim().max(80), codexReasoning: z.enum(['low','medium']), claudeModel: z.string().trim().max(80),
     chunkChars: z.number().int().min(2000).max(20_000), chunkUnits: z.number().int().min(2).max(20),
-    timeoutMinutes: z.number().int().min(2).max(60), sectionsAtOnce: z.number().int().min(1).max(4),
+    timeoutMinutes: z.number().int().min(2).max(60), sectionsAtOnce: z.number().int().min(1).max(5),
     /** Library items prepared at the same time; further starts wait in a first-in, first-out queue. */
-    lessonsAtOnce: z.number().int().min(1).max(3),
+    lessonsAtOnce: z.number().int().min(1).max(5),
   }),
   lessons: z.object({ defaultLevel: z.enum(familiarities), hostName: z.string().trim().min(1).max(40), expertName: z.string().trim().min(1).max(40) }),
   voice: z.object({ narrator: z.enum(voices), host: z.enum(voices), expert: z.enum(voices), rate: z.number().min(0.5).max(2) }),
@@ -112,7 +112,7 @@ Draft data:
     tutorStyle: 'Speak as a knowledgeable, patient tutor who understands which ideas carry the most cognitive weight. Use warm, precise, conversational delivery. Pause naturally before definitions, after important conclusions, and between steps of difficult reasoning; move a little faster through connective material. Emphasize meaningful contrasts, quantities, and causal words without sounding dramatic. Never read Markdown, raw notation, speaker labels, or stage directions aloud.',
   },
   research: { maxLinks: 4 },
-  preparation: { defaultProvider: 'codex', codexModel: 'gpt-6-sol', codexReasoning: 'low', claudeModel: '', chunkChars: 7000, chunkUnits: 8, timeoutMinutes: 12, sectionsAtOnce: 3, lessonsAtOnce: 1 },
+  preparation: { defaultProvider: 'codex', codexModel: 'gpt-6-sol', codexReasoning: 'low', claudeModel: '', chunkChars: 7000, chunkUnits: 8, timeoutMinutes: 12, sectionsAtOnce: 5, lessonsAtOnce: 1 },
   lessons: { defaultLevel: 'foundational', hostName: 'Maya', expertName: 'Arun' },
   voice: { narrator: 'Ryan', host: 'Aiden', expert: 'Ryan', rate: 1 },
   capture: { maxLinks: 8, maxImages: 6 },

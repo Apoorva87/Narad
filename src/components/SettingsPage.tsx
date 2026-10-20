@@ -78,8 +78,8 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             <NumberField label="Section size (characters)" hint="Source text sent per writing call. Smaller is more focused." min={2000} max={20000} step={500} {...field('preparation', 'chunkChars')} />
             <NumberField label="Paragraphs per writing call" hint="Upper bound on paragraphs and tables per call." min={2} max={20} {...field('preparation', 'chunkUnits')} />
             <NumberField label="Time limit per call (minutes)" hint="A step that runs longer is stopped." min={2} max={60} {...field('preparation', 'timeoutMinutes')} />
-            <NumberField label="Subagents per batch" hint="Independent sections delegated in parallel by one Codex coordinator." min={1} max={4} {...field('preparation', 'sectionsAtOnce')} />
-            <NumberField label="Lessons at once" hint="How many lessons can prepare at the same time. Each uses your agent account; more at once can hit rate limits." min={1} max={3} step={1} {...field('preparation', 'lessonsAtOnce')} />
+            <NumberField label="Section writers in parallel" hint="Independent sections delegated in parallel; reviews overlap the next writing batch." min={1} max={5} {...field('preparation', 'sectionsAtOnce')} />
+            <NumberField label="Lessons at once" hint="How many lessons can prepare at the same time. Each runs its own sections in parallel on your agent account, so lessons × sections at once can hit rate limits." min={1} max={5} step={1} {...field('preparation', 'lessonsAtOnce')} />
           </div>}
           {section.id === 'capture' && <div className="settings-grid">
             <NumberField label="Links found by topic research" hint="Used when a lesson starts from notes only." min={1} max={12} {...field('research', 'maxLinks')} />

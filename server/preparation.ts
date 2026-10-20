@@ -395,8 +395,43 @@ export class PreparationService {
     const mark=(item:Pending,patch:Partial<Progress['sections'][string]>,attempt=false)=>this.update(slug,p=>{
       const section=p.sections[item.task.id];if(!section)return;Object.assign(section,patch);if(attempt)section.attempts++;if(section.error===undefined)delete section.error;
     });
+    type ReviewOutcome={error?:unknown};
+    type InFlightReview={batchNumber:number;completed:boolean;outcome:Promise<ReviewOutcome>};
+    let inFlightReview:InFlightReview|undefined;
+    const finishReview=async()=>{
+      if(!inFlightReview)return;
+      const review=inFlightReview;inFlightReview=undefined;
+      const outcome=await review.outcome;if(outcome.error)throw outcome.error;
+    };
+    const startReview=(batchNumber:number,batch:Pending[],reviewable:Pending[],inputs:unknown[],images:string[])=>{
+      const record:InFlightReview={batchNumber,completed:false,outcome:Promise.resolve({})};
+      record.outcome=(async()=>{
+        try{
+          active.stage=`Reviewing ${reviewable.length} section${reviewable.length===1?'':'s'} ${reviewable.length>1?'with '+reviewable.length+' Codex subagents':'in the Codex coordinator'} · ${reviewable.map(item=>item.task.section.title).join(' · ')}`;
+          const reviewInputs=reviewable.map(item=>({taskId:item.task.id,source:inputs[batch.indexOf(item)],draft:item.teaching}));
+          const reviewInstructions=`NARAD_MULTI_AGENT_REVIEW_COORDINATOR_V1\nYou are coordinating ${reviewable.length} independent curriculum reviews. ${reviewable.length>1?'Spawn exactly one reviewer subagent per task item immediately and run them in parallel.':'Complete the single review directly.'} Each reviewer must compare only its assigned source and draft using the shared review rules below. Wait for every reviewer, verify that every requested taskId appears exactly once, and return the combined structured result without softening or combining issues.\n`+prompt('review',{source:reviewInputs.map(item=>({taskId:item.taskId,source:item.source})),draft:reviewInputs.map(item=>({taskId:item.taskId,draft:item.draft}))});
+          const reviewIds=reviewable.map(item=>item.task.id);
+          const reviewed=reviewBatchSchema(reviewIds).parse(await run('review','batch-'+batchNumber,reviewInstructions,reviewBatchSchema(reviewIds),images,{multiAgent:reviewable.length>1,reasoningEffort:settings.preparation.codexReasoning}));
+          const reviewById=new Map(reviewed.results.map(result=>[result.taskId,result]));
+          for(const item of reviewable){
+            const review=reviewById.get(item.task.id)!;const reviewIssues=reconcileReviewIssues(item.teaching!,review.issues);
+            item.issues=reviewIssues.length?reviewIssues:review.issues.length?[]:review.approved?[]:['Content review did not approve this section.'];
+            if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item);continue}
+            const saved:SavedSection={task:item.task.id,title:item.task.section.title,sourceHash:sectionHash(item.task),teaching:item.teaching!};
+            this.fs.writeJson(slug,`preparation/sections/${item.task.id}.json`,saved);results.set(item.task.id,item.teaching!);
+            await mark(item,{state:'done',durationMs:Date.now()-item.started,error:undefined});
+          }
+          return {};
+        }catch(error){
+          if(!signal.aborted)await Promise.all(reviewable.map(item=>mark(item,{state:'failed',durationMs:Date.now()-item.started,error:message(error)})));
+          throw error;
+        }
+      })().then(outcome=>{record.completed=true;return outcome},error=>{record.completed=true;return {error}});
+      inFlightReview=record;
+    };
     let batchNumber=0;
-    while(queue.length){
+    while(queue.length||inFlightReview){
+      if(!queue.length){await finishReview();continue}
       signal.throwIfAborted();
       const batch=queue.splice(0,settings.preparation.sectionsAtOnce);batchNumber++;
       try{
@@ -418,7 +453,8 @@ export class PreparationService {
           item.draft++;await mark(item,{state:'writing',error:undefined},true);
         }
         const titles=batch.map(item=>item.task.section.title).join(' · ');const revising=batch.some(item=>item.issues.length);
-        active.stage=`${revising?'Revising':'Writing'} ${batch.length} section${batch.length===1?'':'s'} ${batch.length>1?'with '+batch.length+' Codex subagents':'in the Codex coordinator'} · draft ${Math.max(...batch.map(item=>item.draft))} · ${revising?progressIssue(batch.flatMap(item=>item.issues)):titles}`;
+        const writingStage=`${revising?'Revising':'Writing'} ${batch.length} section${batch.length===1?'':'s'} ${batch.length>1?'with '+batch.length+' Codex subagents':'in the Codex coordinator'} · draft ${Math.max(...batch.map(item=>item.draft))} · ${revising?progressIssue(batch.flatMap(item=>item.issues)):titles}`;
+        active.stage=inFlightReview&&!inFlightReview.completed?`${writingStage} while reviewing batch ${inFlightReview.batchNumber}`:writingStage;
         const authorInstructions=`NARAD_MULTI_AGENT_COORDINATOR_V1\nYou are coordinating ${batch.length} independent section-writing task${batch.length===1?'':'s'}. ${batch.length>1?'Spawn exactly one subagent per task item immediately and run them in parallel.':'Complete the single task directly.'} Give each worker only its assigned task item plus the shared teaching rules below. Wait for every worker, verify that every requested taskId appears exactly once, and return the combined structured result. Do not merge sections or omit an item. For an item with previousDraft and issues, return a complete corrected replacement. Attached images are numbered in the task data; inspect them and preserve that association.\n`+
           prompt('section',{input:inputs})+(batch.some(item=>item.issues.length)?'\n'+prompt('revision',{issues:batch.map(item=>({taskId:item.task.id,issues:item.issues})),draft:batch.map(item=>({taskId:item.task.id,draft:item.teaching}))}):'');
         const authorIds=batch.map(item=>item.task.id);
@@ -432,26 +468,14 @@ export class PreparationService {
           item.teaching=item.issues.length?authoredTeaching:normalizeTeaching(authoredTeaching);
           if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item)}else{await mark(item,{state:'reviewing'});reviewable.push(item)}
         }
-        if(!reviewable.length)continue;
-        active.stage=`Reviewing ${reviewable.length} section${reviewable.length===1?'':'s'} ${reviewable.length>1?'with '+reviewable.length+' Codex subagents':'in the Codex coordinator'} · ${reviewable.map(item=>item.task.section.title).join(' · ')}`;
-        const reviewInputs=reviewable.map(item=>({taskId:item.task.id,source:inputs[batch.indexOf(item)],draft:item.teaching}));
-        const reviewInstructions=`NARAD_MULTI_AGENT_REVIEW_COORDINATOR_V1\nYou are coordinating ${reviewable.length} independent curriculum reviews. ${reviewable.length>1?'Spawn exactly one reviewer subagent per task item immediately and run them in parallel.':'Complete the single review directly.'} Each reviewer must compare only its assigned source and draft using the shared review rules below. Wait for every reviewer, verify that every requested taskId appears exactly once, and return the combined structured result without softening or combining issues.\n`+prompt('review',{source:reviewInputs.map(item=>({taskId:item.taskId,source:item.source})),draft:reviewInputs.map(item=>({taskId:item.taskId,draft:item.draft}))});
-        const reviewIds=reviewable.map(item=>item.task.id);
-        const reviewed=reviewBatchSchema(reviewIds).parse(await run('review','batch-'+batchNumber,reviewInstructions,reviewBatchSchema(reviewIds),images,{multiAgent:reviewable.length>1,reasoningEffort:settings.preparation.codexReasoning}));
-        const reviewById=new Map(reviewed.results.map(result=>[result.taskId,result]));
-        for(const item of reviewable){
-          const review=reviewById.get(item.task.id)!;const reviewIssues=reconcileReviewIssues(item.teaching!,review.issues);
-          item.issues=reviewIssues.length?reviewIssues:review.issues.length?[]:review.approved?[]:['Content review did not approve this section.'];
-          if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item);continue}
-          const saved:SavedSection={task:item.task.id,title:item.task.section.title,sourceHash:sectionHash(item.task),teaching:item.teaching!};
-          this.fs.writeJson(slug,`preparation/sections/${item.task.id}.json`,saved);results.set(item.task.id,item.teaching!);
-          await mark(item,{state:'done',durationMs:Date.now()-item.started,error:undefined});
-        }
+        if(reviewable.length){await finishReview();startReview(batchNumber,batch,reviewable,inputs,images)}
       }catch(error){
+        if(inFlightReview){const review=inFlightReview;inFlightReview=undefined;await review.outcome;}
         if(!signal.aborted)await Promise.all(batch.map(item=>mark(item,{state:'failed',durationMs:Date.now()-item.started,error:message(error)})));
         throw error;
       }
     }
+    await finishReview();
   }
 
   private async section(slug: string, task: TeachingTask, tasks: TeachingTask[], intent: string, active: Active, run: Run, prompt: ReturnType<typeof promptKit>, settings: Settings): Promise<AuthoredSection> {

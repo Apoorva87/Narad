@@ -73,9 +73,9 @@ async function teach(r:AgentRequest){
  return {id,introduction:'Learn delay.',hostQuestion:'What is delay?',units:units.map(u=>({id:u.id,walkthrough:'Explained: '+u.text+' Here is why.',walkthroughSpoken:'Explained.',dialogue:'Picture this: '+u.text+' Then think.',dialogueSpoken:'Picture this.',question:null})),visuals:[]};
 }
 type Run=(r:AgentRequest,s:AbortSignal)=>Promise<unknown>;
-async function setupThree(run:Run,atOnce=1){
+async function setupThree(run:Run,atOnce=1,markdown=three){
  const dir=await mkdtemp(join(tmpdir(),'narad-job-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);
- store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown:three,assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);
+ store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown,assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);
  const settings=store.getSettings();settings.preparation.sectionsAtOnce=atOnce;store.saveSettings(settings);
  const runner={current:run};
  const service=new PreparationService(store,dir,{run:(r,s)=>runner.current(r,s),available:()=>[{id:'codex',available:true}]});services.push(service);
@@ -144,6 +144,27 @@ it('honors the configured native-subagent batch width',async()=>{
  t.service.start('source','codex');expect((await finished(t.service)).status).toBe('completed');
  expect(requests.filter(request=>request.kind==='author').map(batchIds)).toEqual([['r0-s00-p0','r0-s01-p0'],['r0-s02-p0']]);
  expect(requests.filter(request=>request.kind==='author').map(request=>request.multiAgent)).toEqual([true,false]);
+});
+it('starts the next five-writer batch while the prior batch is under review',async()=>{
+ const sections=Array.from({length:6},(_,index)=>`# Part ${index+1}\n\nA delay of ${index+1} ms.`).join('\n\n');
+ const started:string[]=[];const requests:AgentRequest[]=[];let secondWriterStarted!:()=>void;const secondWriter=new Promise<void>(resolve=>{secondWriterStarted=resolve});const events:string[]=[];
+ const run:Run=async request=>{
+  requests.push(request);
+  const ids=batchIds(request);
+  if(request.kind==='review'){
+   events.push('review-start');
+   if(ids.some(id=>id==='r0-s00-p0'))await Promise.race([secondWriter,new Promise<void>(resolve=>setTimeout(resolve,250))]);
+   events.push('review-finish');return{results:ids.map(taskId=>({taskId,approved:true,issues:[]}))};
+  }
+  if(request.kind==='summary')return answer(request);
+  started.push(...ids);events.push('author-start');if(ids.includes('r0-s05-p0'))secondWriterStarted();
+  return{results:ids.map(taskId=>{const section=Number(/-s(\d+)-/.exec(taskId)![1]);const unit=`s${String(section).padStart(2,'0')}-u00`;return{taskId,teaching:{id:`s${String(section).padStart(2,'0')}`,introduction:'Learn delay.',hostQuestion:'What is delay?',units:[{id:unit,walkthrough:`The ${section+1} ms delay is elapsed time.`,walkthroughSpoken:`The delay is ${section+1} milliseconds.`,dialogue:`The measured delay is ${section+1} ms.`,dialogueSpoken:`The measured delay is ${section+1} milliseconds.`,question:null}],visuals:[]}}})};
+ };
+ const t=await setupThree(run,5,sections);t.service.start('source','codex');expect((await finished(t.service)).status).toBe('completed');
+ const authorRequests=requests.filter(request=>request.kind==='author');
+ expect(authorRequests.map(batchIds).map(ids=>ids.length)).toEqual([5,1]);
+ expect(events.indexOf('author-start',events.indexOf('review-start'))).toBeLessThan(events.indexOf('review-finish'));
+ expect(started).toHaveLength(6);
 });
 it('starts over by archiving earlier sections and writing every section again',async()=>{
  const t=await setupThree(failThird);t.service.start('source','codex');await finished(t.service);

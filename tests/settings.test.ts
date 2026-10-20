@@ -5,13 +5,17 @@ import { LessonStore } from '../server/store';
 describe('settings', () => {
   it('ships valid defaults and fills only known slots', () => {
     expect(settingsSchema.safeParse(defaultSettings).success).toBe(true);
-    expect(defaultSettings.preparation).toMatchObject({ codexModel: 'gpt-6-sol', codexReasoning: 'low', sectionsAtOnce: 3 });
+    expect(defaultSettings.preparation).toMatchObject({ codexModel: 'gpt-6-sol', codexReasoning: 'low', sectionsAtOnce: 5 });
     expect(renderPrompt('Hi {{ level }} and {{other}}', { level: 'advanced' })).toBe('Hi advanced and {{other}}');
   });
-  it('limits lessons prepared at once to 1–3, defaulting to 1', () => {
+  it('limits lessons prepared at once to 1–5, defaulting to 1', () => {
     expect(defaultSettings.preparation.lessonsAtOnce).toBe(1);
-    for (const value of [1, 2, 3]) { const s = structuredClone(defaultSettings); s.preparation.lessonsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(true); }
-    for (const value of [0, 4, 1.5]) { const s = structuredClone(defaultSettings); s.preparation.lessonsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(false); }
+    for (const value of [1, 3, 5]) { const s = structuredClone(defaultSettings); s.preparation.lessonsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(true); }
+    for (const value of [0, 6, 1.5]) { const s = structuredClone(defaultSettings); s.preparation.lessonsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(false); }
+  });
+  it('allows up to five section writers in parallel and defaults to five', () => {
+    for (const value of [1, 2, 3, 4, 5]) { const s = structuredClone(defaultSettings); s.preparation.sectionsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(true); }
+    for (const value of [0, 6, 1.5]) { const s = structuredClone(defaultSettings); s.preparation.sectionsAtOnce = value; expect(settingsSchema.safeParse(s).success).toBe(false); }
   });
   it('rejects prompts that drop a required slot or use an unknown one', () => {
     const missing = structuredClone(defaultSettings); missing.prompts.section = 'Explain it.';
