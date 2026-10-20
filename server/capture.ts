@@ -46,7 +46,8 @@ const hostOf = (src?: string, base?: string) => { try { return new URL(src ?? ''
 const isVideoFrame = (src?: string, base?: string) => { const host = hostOf(src, base); return /(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(host) || host === 'player.vimeo.com'; };
 /** Streaming details for a video element or player iframe; undefined when it cannot be streamed over https. Never fetches anything. */
 function videoRef(src: string | undefined, base: string): VideoRef | undefined {
-  let url: URL; try { url = new URL(src ?? '', base); } catch { return undefined; }
+  if (!src?.trim()) return undefined;
+  let url: URL; try { url = new URL(src, base); } catch { return undefined; }
   if (url.protocol !== 'https:') return undefined;
   if (isVideoFrame(url.href)) {
     if (url.hostname === 'player.vimeo.com') { const id = url.pathname.match(/^\/video\/(\d+)/)?.[1]; return id ? { provider: 'vimeo', url: url.href, embedUrl: 'https://player.vimeo.com/video/' + id } : undefined; }

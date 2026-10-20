@@ -42,6 +42,7 @@ export const creditSchema = z.object({
 const httpsUrl = z.url().refine(value => value.startsWith('https://'), 'Use an https link.');
 /** Videos stream from their source: embeds are limited to privacy-enhanced YouTube, Vimeo's player, or the original https file. */
 export const videoSchema = z.object({ provider: z.enum(['youtube', 'vimeo', 'file']), url: httpsUrl, embedUrl: httpsUrl }).superRefine((video, ctx) => {
+  if (!URL.canParse(video.embedUrl)) { ctx.addIssue({ code: 'custom', message: 'This video embed is not a valid link.', path: ['embedUrl'] }); return; }
   const host = new URL(video.embedUrl).hostname;
   const ok = video.provider === 'youtube' ? host === 'www.youtube-nocookie.com'
     : video.provider === 'vimeo' ? host === 'player.vimeo.com' : video.embedUrl === video.url;

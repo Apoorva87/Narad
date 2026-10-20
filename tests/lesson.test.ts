@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLesson } from '../shared/lesson';
+import { lessonSchema, parseLesson } from '../shared/lesson';
 import { flattenBlocks, latestFigureIndex, moveBlock } from '../shared/navigation';
 import samples from '../content/samples.json';
 import { minimalLesson } from './fixture';
@@ -58,6 +58,10 @@ describe('video assets', () => {
     expect(parseLesson(lessonWith({ provider: 'youtube', url: 'https://youtu.be/x', embedUrl: 'https://www.youtube-nocookie.com/embed/x' })).assets[0].kind).toBe('video');
     expect(() => parseLesson(lessonWith(undefined))).toThrow();
   });
+  it('fails validation, without throwing, for a malformed embed', () => {
+    const result = lessonSchemaCheck(lessonWith({ provider: 'youtube', url: 'https://youtu.be/x', embedUrl: 'nope' }));
+    expect(result.success).toBe(false);
+  });
   it('rejects an embed on another host', () => {
     expect(() => parseLesson(lessonWith({ provider: 'youtube', url: 'https://evil.example/embed', embedUrl: 'https://evil.example/embed' }))).toThrow();
     expect(() => parseLesson(lessonWith({ provider: 'vimeo', url: 'https://vimeo.com/1', embedUrl: 'https://www.youtube.com/embed/x' }))).toThrow();
@@ -66,3 +70,5 @@ describe('video assets', () => {
     expect(parseLesson(lessonWith({ provider: 'file', url: 'https://a.example/v.mp4', embedUrl: 'https://a.example/v.mp4' })).assets).toHaveLength(1);
   });
 });
+
+const lessonSchemaCheck = (input: unknown) => lessonSchema.safeParse(input);

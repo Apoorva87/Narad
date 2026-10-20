@@ -178,6 +178,12 @@ describe('credits and streamed videos', () => {
     expect(source.assets[1].video).toMatchObject({ provider: 'vimeo', embedUrl: 'https://player.vimeo.com/video/123' });
     expect(source.warnings).toEqual([]);
   });
+  it('treats a video with no source as not streamable', async () => {
+    const { source } = await run(page('<p>Before.</p><video controls></video><p>After.</p>'));
+    expect(source.assets).toEqual([]);
+    expect(source.markdown).toContain('(source-note-0)');
+    expect(source.warnings.map(w => w.kind)).toEqual(['info']);
+  });
   it('uses video > source and still warns for audio and unknown iframes', async () => {
     const { source } = await run(page('<video><source src="/clip.webm"></video><audio src="a.mp3"></audio><iframe src="https://evil.example/video/1"></iframe>'));
     expect(source.assets).toHaveLength(1);

@@ -91,6 +91,15 @@ describe('library folders', () => {
     expect(readFileSync(join(store.libraryRoot, 'attention-notes', 'lesson.md'), 'utf8')).toContain('An exact statement.');
     expect(readFileSync(join(store.libraryRoot, 'attention-notes', 'CREDITS.md'), 'utf8')).toContain('https://example.com/a');
   });
+  it('lists an item whose hand-edited video embed is malformed as broken, not crashing', () => {
+    const { store } = setup();
+    store.insert(minimalLesson()); store.insert({ ...minimalLesson(), id: 'other', title: 'Other lesson' });
+    const lesson = minimalLesson(); lesson.assets = [{ id: 'v', src: '/assets/video-poster.svg', alt: 'Talk', caption: 'Talk', provenance: 'source', kind: 'video', video: { provider: 'youtube', url: 'https://youtu.be/x', embedUrl: 'nope' } }];
+    writeFileSync(join(store.libraryRoot, 'a-lesson', 'lesson.json'), JSON.stringify(lesson));
+    const list = store.list();
+    expect(list.find(item => item.id === 'a-lesson')!.broken).toMatch(/lesson\.json/);
+    expect(list.find(item => item.id === 'other-lesson')!.broken).toBeUndefined();
+  });
   it('marks a hand-broken lesson.json as broken without hiding other items', () => {
     const { store } = setup();
     store.insert(minimalLesson()); store.insert({ ...minimalLesson(), id: 'other', title: 'Other lesson' });
