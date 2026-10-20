@@ -67,7 +67,7 @@ Authenticate each provider once inside the private `agent-home` Docker volume:
     ./start.sh login codex
     ./start.sh login claude
 
-Codex uses its device-code flow. Claude creates a long-lived subscription token. Follow the URL and code printed by each command; neither flow relies on a browser callback inside the container.
+Codex uses its device-code flow. Claude uses its normal subscription login and saves the credential in the private `agent-home` volume. If Claude's browser callback cannot reach the container, copy the code shown in the browser and paste it into the terminal when prompted.
 
 Then manage the complete service with:
 

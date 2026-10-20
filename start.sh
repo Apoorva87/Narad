@@ -144,7 +144,7 @@ login_provider() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { echo "The Docker daemon is not running." >&2; return 1; }
   find_compose;ensure_runtime
   if [[ "$provider" == codex ]]; then compose run --rm --entrypoint codex agent login --device-auth
-  else compose run --rm --entrypoint claude agent setup-token
+  else compose run --rm --entrypoint claude agent auth login --claudeai
   fi
 }
 

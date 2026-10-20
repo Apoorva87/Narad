@@ -30,7 +30,7 @@ it('provides start, restart, kill, status, and provider-login operations',async(
  for(const operation of ['start','restart','status'])expect(script).toMatch(new RegExp(`\\b${operation}\\)`));
  expect(script).toMatch(/kill\|stop\)/);
  expect(script).toContain('login codex|claude');expect(script).toContain('server/tts-host.ts');expect(script).toContain('--env-file');
- expect(script).toContain('login --device-auth');expect(script).toContain('setup-token');
+ expect(script).toContain('login --device-auth');expect(script).toContain('auth login --claudeai');expect(script).not.toContain('setup-token');
  expect(script).toContain("ps -p \"$pid\" -o lstart=");expect(script).toContain("ps -p \"$pid\" -o command=");
  expect(script).toContain('NARAD_UID=');
 });
