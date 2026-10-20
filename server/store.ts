@@ -6,7 +6,7 @@ import { dirname, extname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { familiarities, lessonSchema, modes, parseLesson, type Lesson, type LessonSummary, type Mode, type Progress } from '../shared/lesson';
 import { flattenBlocks } from '../shared/navigation';
-import type { SourceBundle, BundleSummary, AssetBlob, CapturedSource, SourceAsset } from '../shared/sources';
+import { isBlocking, legacyWarning, type SourceBundle, BundleSummary, AssetBlob, CapturedSource, SourceAsset } from '../shared/sources';
 import { resolveSettings, settingsOverrides, type Settings } from '../shared/settings';
 import { LibraryFs, mediaName, slugify, toServedSrc, toStoredSrc } from './library';
 import { renderCredits, renderLessonMarkdown } from './library-render';
@@ -33,7 +33,7 @@ const sourceMetaSchema = z.object({
     id: z.string(), kind: z.enum(['image', 'inline-svg']), alt: z.string(), caption: z.string(),
     src: z.string().optional(), originalSrc: z.string().optional(), originalUrl: z.string().optional(), widthEm: z.number().optional(), error: z.string().optional(),
   })),
-  warnings: z.array(z.string()),
+  warnings: z.array(z.union([z.string().transform(legacyWarning), z.object({ kind: z.enum(['blocking', 'info']), message: z.string(), assetId: z.string().optional() })])),
   inventory: z.object({ images: z.number(), inlineSvg: z.number(), tables: z.number(), savedVisuals: z.number() }),
 });
 type Parsed<T> = { value?: T; error?: string };
@@ -165,7 +165,7 @@ export class LessonStore {
       try {
         const bundle = this.bundleAt(slug)!;
         summaries.push({ id: slug, title: bundle.title, createdAt: bundle.createdAt, status: bundle.status, lessonId: bundle.lessonId,
-          sourceCount: bundle.sources.length, visualCount: bundle.sources.reduce((sum, source) => sum + source.inventory.savedVisuals, 0), warningCount: bundle.sources.reduce((sum, source) => sum + source.warnings.length, 0) });
+          sourceCount: bundle.sources.length, visualCount: bundle.sources.reduce((sum, source) => sum + source.inventory.savedVisuals, 0), warningCount: bundle.sources.reduce((sum, source) => sum + source.warnings.filter(warning => warning.kind === 'blocking').length, 0) });
       } catch (caught) {
         if (!(caught instanceof StoreError)) throw caught;
         summaries.push({ id: slug, title, createdAt: item?.createdAt ?? '', status: 'needs-review', sourceCount: 0, visualCount: 0, warningCount: 0, broken: caught.message });
@@ -299,7 +299,7 @@ export class LessonStore {
         assets: meta.value.assets.map(asset => ({ ...asset, ...(asset.src && { src: served(asset.src) }), ...(asset.originalSrc && { originalSrc: served(asset.originalSrc) }) })) };
     });
     return { id: slug, title: item.title, createdAt: item.createdAt, text: this.text(slug, 'sources/notes.md') ?? '', familiarity: item.level,
-      status: item.status, lessonId: this.has(slug, 'lesson.json') ? slug : undefined, sources };
+      status: sources.some(isBlocking) ? 'needs-review' : 'captured', lessonId: this.has(slug, 'lesson.json') ? slug : undefined, sources };
   }
   /**
    * Returns the stored (relative) form of an image path, writing captured bytes or copying another item's media into this folder.

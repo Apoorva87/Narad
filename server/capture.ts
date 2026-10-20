@@ -42,6 +42,8 @@ async function svgAsset(svg: string): Promise<{ original: AssetBlob; preview: As
   return { original, preview };
 }
 
+const isVideoFrame = (src?: string) => /youtube|youtu\.be|vimeo|video/i.test(src ?? '');
+
 export async function captureArticle(url: string, download: Download = downloadPublic): Promise<{ source: CapturedSource; blobs: AssetBlob[] }> {
   const response = await download(url);
   if (!/text\/html|application\/xhtml\+xml/i.test(response.type)) throw new Error('This link is not an HTML article. Add a webpage link or upload an image.');
@@ -51,15 +53,20 @@ export async function captureArticle(url: string, download: Download = downloadP
   const source: CapturedSource = { id: randomUUID(), title: $('h1').first().text().trim() || $('title').text().trim() || new URL(url).hostname,
     kind: 'article', url: response.url, rawHtml: html, markdown: '', assets: [], warnings: [],
     inventory: { images: root.find('img').length, inlineSvg: root.find('svg').filter((_i, node) => $(node).parents('svg').length === 0).length, tables: root.find('table').length, savedVisuals: 0 } };
-  if (root.find('canvas, iframe, video, audio, math').length) source.warnings.push('This page includes embedded media or MathML. Check the original for content that a static capture cannot display.');
   root.find('script[type^="math/tex"]').each((_i, node) => {
     const element = $(node);
     element.replaceWith($('<span>').attr('data-narad-math', element.text()).attr('data-display', element.attr('type')?.includes('mode=display') ? 'block' : 'inline').text(element.text()));
   });
   root.find('script, style, nav, button, noscript, form').remove();
-  if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push('A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.');
+  if (root.find('video, audio, iframe').filter((_i, node) => node.tagName !== 'iframe' || isVideoFrame($(node).attr('src'))).length) source.warnings.push({ kind: 'info', message: 'This page includes video or audio that a static capture cannot keep. Check the original: ' + response.url });
+  if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push({ kind: 'info', message: 'A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.' });
   const blobs: AssetBlob[] = []; let downloadedBytes = response.bytes.length;
   const visuals = root.find('img, svg').filter((_i, node) => $(node).parents('svg').length === 0).toArray();
+  // Interactive elements cannot be kept; leave a marker at their position and say so.
+  root.find('canvas, iframe, math').filter((_i, node) => node.tagName !== 'iframe' || !isVideoFrame($(node).attr('src'))).each((n, node) => {
+    $(node).replaceWith($('<p>').append($('<img>').attr('src', 'source-note-' + n).attr('alt', 'Interactive figure')));
+    source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + response.url });
+  });
   // Keep source order while limiting network concurrency. No background worker infrastructure needed.
   const tasks = visuals.map((node, index) => {
     const element = $(node); const isSvg = node.tagName === 'svg';
@@ -91,14 +98,14 @@ export async function captureArticle(url: string, download: Download = downloadP
             if (blob.type === 'image/tiff') {
               const preview = assetBlob(await sharp(bytes, { limitInputPixels: 40_000_000 }).png().toBuffer(), 'image/png');
               blobs.push(preview); asset.src = assetPath(preview);
-              source.warnings.push(asset.alt + ': TIFF preview shows the first page. Download the preserved original to review all pages.');
+              source.warnings.push({ kind: 'info', message: asset.alt + ': TIFF preview shows the first page. Download the preserved original to review all pages.', assetId: asset.id });
             }
           }
         }
         source.inventory.savedVisuals++;
       } catch (error) {
         asset.error = error instanceof Error ? error.message : 'Could not preserve this visual.';
-        source.warnings.push(asset.alt + ': ' + asset.error);
+        source.warnings.push({ kind: 'blocking', message: asset.alt + ': ' + asset.error, assetId: asset.id });
       }
     };
   });
@@ -141,6 +148,6 @@ export async function captureArticle(url: string, download: Download = downloadP
     },
   });
   source.markdown = converter.turndown(root.html() ?? '');
-  if (!source.markdown.trim()) source.warnings.push('No readable article content was found. This page may require JavaScript or a sign-in.');
+  if (!source.markdown.trim()) source.warnings.push({ kind: 'blocking', message: 'No readable article content was found. This page may require JavaScript or a sign-in.' });
   return { source, blobs };
 }

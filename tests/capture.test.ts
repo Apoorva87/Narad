@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { captureArticle } from '../server/capture';
+import { isBlocking, legacyWarning } from '../shared/sources';
 import { isPublicAddress } from '../server/download';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -28,6 +29,25 @@ describe('source preservation', () => {
     expect(captured.source.assets[0].error).toContain('unavailable');
     expect(captured.source.markdown).toMatch(/Before[\s\S]*source-asset-[\s\S]*After/);
     expect(captured.source.warnings).toHaveLength(1);
+  });
+  it('replaces interactive elements with note markers and informational warnings', async () => {
+    const captured = await captureArticle('https://example.com/p', async url => ({ bytes: Buffer.from('<article><h1>T</h1><p>Before 1.</p><canvas id="c"></canvas><p>Mid.</p><table><tr><td colspan="2">x</td></tr></table></article>'), type: 'text/html', url }));
+    expect(captured.source.markdown).toMatch(/Before 1\.[\s\S]*!\[Interactive figure\]\(source-note-0\)[\s\S]*Mid\./);
+    expect(captured.source.warnings.map(w => w.kind)).toEqual(['info', 'info']);
+    expect(captured.source.warnings.some(w => w.message.includes('https://example.com/p'))).toBe(true);
+    expect(isBlocking(captured.source)).toBe(false);
+  });
+  it('keeps failed visuals blocking', async () => {
+    const captured = await captureArticle('https://example.com/', async url => {
+      if (url.endsWith('.png')) throw new Error('Image unavailable');
+      return { bytes: Buffer.from('<article><p>Before</p><img src="lost.png"></article>'), type: 'text/html', url };
+    });
+    expect(captured.source.warnings[0].kind).toBe('blocking');
+    expect(isBlocking(captured.source)).toBe(true);
+  });
+  it('classifies legacy string warnings', () => {
+    expect(legacyWarning('A table contains merged cells. Its preview is flattened.').kind).toBe('info');
+    expect(legacyWarning('Source unavailable').kind).toBe('blocking');
   });
   it('does not rasterize SVGs that reference outside resources', async () => {
     const captured = await captureArticle('https://example.com/', async url => ({ bytes: Buffer.from('<article><svg width="20" height="20"><image href="file:///etc/passwd"/></svg></article>'), type: 'text/html', url }));

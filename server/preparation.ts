@@ -82,7 +82,7 @@ export class PreparationService {
         const media=asset.src!.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);const file=media&&this.store.mediaPath(media[1],media[2]);if(!file)throw new Error('Saved source visual is missing: '+asset.id);
         const path=join(cwd,task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(await readFile(file)).png().toBuffer());images.push(path);
       }
-      const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:task.section,visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
+      const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:{...task.section,units:task.section.units.filter(u=>u.kind!=='note')},visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
       const instruction=prompt('section',{input:context});
       let teaching:TeachingOutput['teaching']|undefined;let issues:string[]=[];
       for(let attempt=0;attempt<settings.preparation.reviewRounds;attempt++){

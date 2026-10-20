@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { parseLesson, type Lesson } from '../shared/lesson';
-import type { CapturedSource, SourceAsset, SourceBundle } from '../shared/sources';
+import { isBlocking, type CapturedSource, type SourceAsset, type SourceBundle } from '../shared/sources';
 import { authoredSectionSchema, compileTeachingLesson, splitSourceSections, type AuthoredSection, type SourceSection, type Speakers } from './lesson-preparation';
 export type TeachingTask = { id: string; source: CapturedSource; section: SourceSection; assets: SourceAsset[] };
 export type TeachingOutput = { task: TeachingTask; teaching: AuthoredSection };
@@ -11,7 +11,7 @@ export const reviewSchema = z.object({ approved: z.boolean(), issues: z.array(z.
 export const researchSchema = z.object({ links: z.array(z.string().regex(/^https?:\/\/[^\s]+$/)).min(1).max(4), rationale: z.string() });
 export type ChunkLimits = { chunkChars: number; chunkUnits: number };
 export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { chunkChars: 7000, chunkUnits: 8 }): TeachingTask[] {
-  if (bundle.status !== 'captured' || bundle.sources.some(s=>s.warnings.length || s.assets.some(a=>!a.src))) throw new Error('Finish source capture and resolve its warnings before preparing a lesson.');
+  if (bundle.status !== 'captured' || bundle.sources.some(s=>isBlocking(s) || s.assets.some(a=>!a.src))) throw new Error('Finish source capture and resolve its warnings before preparing a lesson.');
   const sources = bundle.sources.some(s=>s.kind !== 'note') ? bundle.sources.filter(s=>s.kind !== 'note') : bundle.sources;
   const tasks: TeachingTask[] = [];
   for (const [index, source] of sources.entries()) {
@@ -41,7 +41,7 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   if (!parsed.success) return ['Invalid teaching structure: '+parsed.error.message.slice(0,1500)];
   const teaching=parsed.data;const issues:string[]=[];
   if(teaching.id!==task.section.id) issues.push('Wrong section ID');
-  const units=task.section.units.filter(u=>u.kind!=='figure');
+  const units=task.section.units.filter(u=>u.kind!=='figure' && u.kind!=='note');
   for(const unit of units) {
     const draft=teaching.units.find(u=>u.id===unit.id);
     if(!draft) {issues.push('Missing unit '+unit.id);continue;}

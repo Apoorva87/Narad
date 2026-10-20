@@ -12,9 +12,17 @@ export type SourceAsset = {
   id: string; kind: 'image' | 'inline-svg'; alt: string; caption: string;
   src?: string; originalSrc?: string; originalUrl?: string; widthEm?: number; error?: string;
 };
+/** Blocking warnings stop lesson preparation; informational ones become "Not captured" notes. */
+export type CaptureWarning = { kind: 'blocking' | 'info'; message: string; assetId?: string };
+const informational = [/^A table contains merged cells\./, /: TIFF preview shows the first page\./, /^This page includes embedded media or MathML\./, /^An interactive figure could not be kept\./];
+/** Converts a warning stored as plain text before kinds existed. */
+export function legacyWarning(message: string): CaptureWarning {
+  return { kind: informational.some(pattern => pattern.test(message)) ? 'info' : 'blocking', message };
+}
+export const isBlocking = (source: Pick<CapturedSource, 'warnings'>) => source.warnings.some(warning => warning.kind === 'blocking');
 export type CapturedSource = {
   id: string; title: string; kind: 'article' | 'note' | 'image'; url?: string;
-  markdown: string; rawHtml?: string; assets: SourceAsset[]; warnings: string[];
+  markdown: string; rawHtml?: string; assets: SourceAsset[]; warnings: CaptureWarning[];
   inventory: { images: number; inlineSvg: number; tables: number; savedVisuals: number };
 };
 export type SourceBundle = {

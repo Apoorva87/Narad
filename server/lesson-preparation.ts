@@ -9,7 +9,7 @@ export const authoredSectionSchema = z.object({
   visuals: z.array(z.object({ id: prose, caption: prose, explanation: prose, spokenText: prose, dialogueTurns: z.array(z.object({ role: z.enum(['host', 'expert']), markdown: prose, spokenText: prose })).min(2).max(12).optional() })),
 });
 export type AuthoredSection = z.infer<typeof authoredSectionSchema>;
-export type SourceUnit = { id: string; kind: 'text' | 'table' | 'figure'; markdown: string; assetIds: string[] };
+export type SourceUnit = { id: string; kind: 'text' | 'table' | 'figure' | 'note'; markdown: string; assetIds: string[] };
 export type SourceSection = { id: string; title: string; units: SourceUnit[] };
 export type TeachingInput = {
   id: string; title: string; description: string; topic: string; bundle: SourceBundle;
@@ -25,7 +25,7 @@ export function splitSourceSections(markdown: string): SourceSection[] {
     const id = 's' + String(i).padStart(2, '0');
     const units = lines.join('\n').trim().split(/\n\s*\n/).filter(chunk => chunk.trim()).map((chunk, j): SourceUnit => ({
       id: id + '-u' + String(j).padStart(2, '0'), markdown: chunk.trim(),
-      kind: /^!\[[^\]]*\]\(source-asset-[a-zA-Z0-9_-]+\)$/.test(chunk.trim()) ? 'figure' : chunk.trimStart().startsWith('|') ? 'table' : 'text',
+      kind: /^!\[[^\]]*\]\(source-note-\d+\)$/.test(chunk.trim()) ? 'note' : /^!\[[^\]]*\]\(source-asset-[a-zA-Z0-9_-]+\)$/.test(chunk.trim()) ? 'figure' : chunk.trimStart().startsWith('|') ? 'table' : 'text',
       assetIds: [...chunk.matchAll(/\]\((source-asset-[a-zA-Z0-9_-]+)\)/g)].map(match => match[1]),
     }));
     return { id, title: heading.replace(/^#+\s*/, '').replace(/\\\./g, '.').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'), units };
@@ -49,7 +49,7 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
   const makeMode = (mode: 'walkthrough' | 'dialogue'): Section[] => layout.map(section => {
     const teaching = authored.find(item => item.id === section.id);
     if (!teaching) throw new Error('Missing teaching section: ' + section.id);
-    const nonFigures = section.units.filter(unit => unit.kind !== 'figure');
+    const nonFigures = section.units.filter(unit => unit.kind !== 'figure' && unit.kind !== 'note');
     const unitIds = teaching.units.map(unit => unit.id);
     if (new Set(unitIds).size !== unitIds.length || unitIds.some(id => !nonFigures.some(unit => unit.id === id))) throw new Error('Unexpected or duplicate teaching unit in ' + section.id);
     const references = [{ sourceId: source.id, locator: section.title }];
@@ -59,6 +59,11 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
       : [{ id: prefix + section.id + '-host', kind: 'dialogue', speaker: host, role: 'host', markdown: teaching.hostQuestion, spokenText: teaching.hostQuestion, origin: 'teaching', references }];
     if (mode === 'dialogue' && nonFigures.length === 0) blocks.push({ id: prefix + section.id + '-intro', kind: 'dialogue', speaker: expert, role: 'expert', markdown: teaching.introduction, spokenText: teaching.introduction, origin: 'teaching', references });
     for (const unit of section.units) {
+      if (unit.kind === 'note') {
+        const link = source.url ? ' [Open the original ↗](' + source.url + ')' : '';
+        blocks.push({ id: prefix + unit.id, kind: 'callout', title: 'Not captured', markdown: 'An interactive figure here could not be kept.' + link, spokenText: 'An interactive figure in the original article could not be kept here.', origin: 'source', references });
+        continue;
+      }
       if (unit.kind !== 'figure') {
         const explanation = teaching.units.find(item => item.id === unit.id);
         if (!explanation) throw new Error('Missing teaching unit: ' + unit.id);

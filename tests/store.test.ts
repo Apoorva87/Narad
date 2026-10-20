@@ -67,6 +67,16 @@ describe('library folders', () => {
     expect(existsSync(join(store.libraryRoot, 'attention-notes', 'sources', '01-attention-article.md'))).toBe(true);
     expect(store.resolveId('bundle-old')).toBe('attention-notes');
   });
+  it('reads legacy string warnings and derives status from blocking ones', () => {
+    const { store } = setup();
+    store.saveBundle(bundle(), [blob]);
+    const file = join(store.libraryRoot, 'attention-notes', 'sources', '01-attention-article.json');
+    const meta = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...meta, warnings: ['A table contains merged cells. Flattened.'] }));
+    expect(store.getBundle('attention-notes')!.sources[0].warnings).toEqual([{ kind: 'info', message: 'A table contains merged cells. Flattened.' }]);
+    writeFileSync(file, JSON.stringify({ ...meta, warnings: ['Plot: failed'] }));
+    expect(store.getBundle('attention-notes')!).toMatchObject({ status: 'needs-review' });
+  });
   it('writes a prepared lesson into its collection folder with relative image paths', () => {
     const { store } = setup();
     const saved = store.saveBundle(bundle(), [blob]);

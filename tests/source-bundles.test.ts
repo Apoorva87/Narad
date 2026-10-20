@@ -29,7 +29,7 @@ describe('mixed source intake', () => {
     });
     expect(bundle.status).toBe('needs-review');
     expect(bundle.sources.filter(source => source.kind === 'article')).toHaveLength(2);
-    expect(bundle.sources.at(-1)?.warnings).toEqual(['Source unavailable']);
+    expect(bundle.sources.at(-1)?.warnings).toEqual([{ kind: 'blocking', message: 'Source unavailable' }]);
   });
   it('rejects empty submissions and unsupported image input', () => {
     expect(sourceInputSchema.safeParse({ text: '  ' }).success).toBe(false);

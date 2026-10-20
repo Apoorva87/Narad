@@ -3,7 +3,7 @@ import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, type 
 import type { SourceBundle } from '../shared/sources';
 const article = (id:string) => ({id,title:id,kind:'article' as const,markdown:'# Measure\n\nLatency is 42 ms.\n\n![Plot](source-asset-0)\n\n| A | B |\n| --- | --- |\n| x | 12 |',assets:[{id:'source-asset-0',kind:'image' as const,alt:'Plot',caption:'Plot',src:'/api/source-assets/'+'a'.repeat(64)}],warnings:[],inventory:{images:1,inlineSvg:0,tables:1,savedVisuals:1}});
 export const bundle:SourceBundle={id:'collection',title:'Comparing measurements',createdAt:new Date().toISOString(),text:'Explain',status:'captured',sources:[article('one'),article('two')]};
-export const draft=(task:TeachingTask)=>({id:task.section.id,introduction:'Understand the measurement.',hostQuestion:'What does this measurement mean?',units:task.section.units.filter(u=>u.kind!=='figure').map(u=>({id:u.id,walkthrough:'The latency is 42 ms. The table value is 12. This is elapsed time.',walkthroughSpoken:'The latency is forty two milliseconds. The table value is twelve.',dialogue:'It takes 42 ms, and the table lists 12. Think of a stopwatch.',dialogueSpoken:'It takes forty two milliseconds. Think of a stopwatch.',question:'How should I interpret this?'})),visuals:task.assets.map(a=>({id:a.id,caption:'Latency plot',explanation:'Read the horizontal axis before comparing delays.',spokenText:'Read the horizontal axis before comparing delays.'}))});
+export const draft=(task:TeachingTask)=>({id:task.section.id,introduction:'Understand the measurement.',hostQuestion:'What does this measurement mean?',units:task.section.units.filter(u=>u.kind!=='figure'&&u.kind!=='note').map(u=>({id:u.id,walkthrough:'The latency is 42 ms. The table value is 12. This is elapsed time.',walkthroughSpoken:'The latency is forty two milliseconds. The table value is twelve.',dialogue:'It takes 42 ms, and the table lists 12. Think of a stopwatch.',dialogueSpoken:'It takes forty two milliseconds. Think of a stopwatch.',question:'How should I interpret this?'})),visuals:task.assets.map(a=>({id:a.id,caption:'Latency plot',explanation:'Read the horizontal axis before comparing delays.',spokenText:'Read the horizontal axis before comparing delays.'}))});
 it('assembles multiple sources without collisions and preserves exact tables and original snapshots',()=>{
  const tasks=buildTeachingPlan(bundle); const outputs=tasks.map(t=>({task:t,teaching:draft(t)}));
  const lesson=compilePreparedBundle(bundle,outputs,[{title:'One',markdown:'A delay.',spokenText:'A delay.',sourceIds:['one']},{title:'Two',markdown:'Another delay.',spokenText:'Another delay.',sourceIds:['two']},{title:'Together',markdown:'Compare equal units.',spokenText:'Compare equal units.',sourceIds:['one','two']}],'generated');
@@ -50,4 +50,21 @@ describe('lesson description excerpt', () => {
     expect(excerpt('One sentence that is long enough to pass the halfway mark of the limit. '+'More words follow here. '.repeat(12))).toSatisfy((text:string)=>text.length<=240&&text.endsWith('follow here.'));
     expect(excerpt('')).toBe('A source-grounded lesson.');
   });
+});
+
+const noteSource=()=>({...article('page'),url:'https://example.com/p',assets:[],markdown:'# Measure\n\nLatency is 42 ms.\n\n![Interactive figure](source-note-0)\n\nAfter that.',warnings:[{kind:'info' as const,message:'An interactive figure could not be kept.'}]});
+it('prepares a page with informational warnings and compiles a Not captured callout',()=>{
+ const b={...bundle,sources:[noteSource()]};const tasks=buildTeachingPlan(b);
+ expect(tasks.flatMap(t=>t.section.units).filter(u=>u.kind==='note')).toHaveLength(1);
+ const outputs=tasks.map(t=>({task:t,teaching:draft(t)}));
+ expect(checkTeaching(tasks[0],draft(tasks[0]))).toEqual([]);
+ const lesson=compilePreparedBundle(b,outputs,[{title:'One',markdown:'A.',spokenText:'A.',sourceIds:['page']},{title:'All',markdown:'B.',spokenText:'B.',sourceIds:['page']}],'lesson');
+ const blocks=lesson.modes.walkthrough!.sections.flatMap(s=>s.blocks);
+ const i=blocks.findIndex(x=>x.kind==='callout'&&x.title==='Not captured');
+ expect(i).toBeGreaterThan(0);expect(blocks[i].markdown).toBe('An interactive figure here could not be kept. [Open the original ↗](https://example.com/p)');
+ expect(blocks[i].origin).toBe('source');
+});
+it('refuses a source with a blocking warning',()=>{
+ const b={...bundle,sources:[{...noteSource(),warnings:[{kind:'blocking' as const,message:'Plot: failed'}]}]};
+ expect(()=>buildTeachingPlan(b)).toThrow(/capture/);
 });
