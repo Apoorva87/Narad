@@ -42,7 +42,7 @@ type SavedSection = { task: string; title: string; sourceHash: string; teaching:
 type Session = PreparationState['sessions'][number];
 /** One running lesson. Everything a run owns — its abort controller, stage text, live agent sessions — lives here, so runs never share state. */
 type Active = { slug: string; title: string; provider: Provider; stage: string; stopping: boolean; startedAt: string; controller: AbortController; done: Promise<void>; sessions: Session[] };
-type Queued = { slug: string; provider: Provider; familiarity?: Familiarity; action: PrepareAction };
+type Queued = { slug: string; provider: Provider; familiarity?: Familiarity; action: PrepareAction; queuedAt?: string; seq?: number };
 type Run = (step: CallInput['step'], task: string, text: string, schema: CallInput['schema'], images?: string[], options?:Pick<CallInput,'multiAgent'|'reasoningEffort'>) => Promise<unknown>;
 
 const PROGRESS = 'preparation/progress.json';
@@ -79,6 +79,9 @@ export class PreparationService {
   private active = new Map<string, Active>();
   private queue: Queued[] = [];
   private closing = false;
+  private seq = 0;
+  /** Items taken out of the queue by `whileDequeued`; `cancelled` is set when the user stops them meanwhile. */
+  private out = new Map<string, { cancelled: boolean }>();
   private fs: LibraryFs;
   /** Settles once startup has marked runs left `running` or `queued` as interrupted. */
   readonly ready: Promise<void>;
@@ -108,6 +111,7 @@ export class PreparationService {
   async stop(id: string): Promise<PreparationJob> {
     const slug = this.store.resolveId(id) ?? id;
     const active = this.active.get(slug);
+    const out = this.out.get(slug); if (out) out.cancelled = true;
     if (active) {
       active.stopping = true; active.stage = 'Stopping agent…'; active.controller.abort();
       return this.job(slug, this.read(slug));
@@ -147,16 +151,22 @@ export class PreparationService {
     const before = this.read(slug);
     const saved = before && { status: before.status, queuedAt: before.queuedAt, request: before.request, beforeQueue: before.beforeQueue, error: before.error };
     if (!await this.dequeue(slug)) return action(); // started or removed while waiting for the lock
+    const out = { cancelled: false }; this.out.set(slug, out);
     try { return await action(); }
     catch (error) {
-      if (!this.closing && this.queued(slug) < 0 && !this.active.has(slug)) {
-        this.queue.splice(Math.min(index, this.queue.length), 0, entry);
+      if (!this.closing && !out.cancelled && this.queued(slug) < 0 && !this.active.has(slug)) {
+        // Back where it was by original order, not by its old index: items ahead of it may have started or left meanwhile.
+        const later = this.queue.findIndex(other => this.after(other, entry));
+        this.queue.splice(later < 0 ? this.queue.length : later, 0, entry);
         if (saved) await this.update(slug, p => { for (const [key, value] of Object.entries(saved)) if (value === undefined) delete (p as Record<string, unknown>)[key]; else (p as Record<string, unknown>)[key] = value; });
         this.pump();
       }
       throw error;
     }
+    finally { if (this.out.get(slug) === out) this.out.delete(slug); }
   }
+  /** True when `a` was queued after `b` (by persisted time, then by arrival order for ties). */
+  private after(a: Queued, b: Queued) { return (a.queuedAt ?? '') !== (b.queuedAt ?? '') ? (a.queuedAt ?? '') > (b.queuedAt ?? '') : (a.seq ?? 0) > (b.seq ?? 0); }
   /** Lets queued items use slots freed by a raised `lessonsAtOnce`. Lowering it never stops a running lesson. */
   settingsChanged() { this.pump(); }
   /** True while this collection is being prepared (not merely queued), matching old IDs and renamed slugs alike. */
@@ -193,8 +203,9 @@ export class PreparationService {
     }
   }
   private enqueue(entry: Queued, level: Familiarity): PreparationJob {
-    this.queue.push(entry);
     const now = new Date().toISOString();
+    entry.queuedAt = now; entry.seq = ++this.seq;
+    this.queue.push(entry);
     const mark = (p: Progress) => {
       p.beforeQueue ??= p.status === 'queued' ? 'none' : p.status;
       p.status = 'queued'; p.provider = entry.provider; p.queuedAt = now; p.request = { ...(entry.familiarity && { familiarity: entry.familiarity }), action: entry.action };
@@ -214,9 +225,10 @@ export class PreparationService {
     const found = this.store.getBundle(slug)!;
     const bundle = familiarity && familiarity !== found.familiarity ? this.store.saveBundle({ ...found, familiarity }, []) : found;
     buildTeachingPlan(bundle);
+    const settings = this.store.getSettings(); // anything that can throw runs before the slot is taken
     const active: Active = { slug: bundle.id, title: bundle.title, provider, stage: 'Starting preparation', stopping: false, startedAt: new Date().toISOString(), controller: new AbortController(), done: Promise.resolve(), sessions: [] };
     this.active.set(active.slug, active);
-    active.done = this.prepare(active, action, this.store.getSettings())
+    active.done = this.prepare(active, action, settings)
       .catch(error => this.finishFailed(active, error))
       .catch(error => console.error('Could not record the preparation outcome:', error))
       .finally(() => { active.sessions = []; if (this.active.get(active.slug) === active) this.active.delete(active.slug); this.pump(); });
