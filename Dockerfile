@@ -17,7 +17,10 @@ CMD ["npm", "start"]
 
 FROM build AS agent
 USER root
-RUN npm install --global @openai/codex@0.163.0 @anthropic-ai/claude-code@2.1.304
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install --global @openai/codex@0.163.0 @anthropic-ai/claude-code@2.1.304
 ENV NODE_ENV=production HOME=/home/narad
 USER narad
 CMD ["node", "--import", "tsx", "server/agent-service.ts"]

@@ -21,6 +21,7 @@ it('isolates the agent from the Docker socket, host home, and Narad database',as
 it('builds pinned agent CLIs without putting MLX in a Linux image',async()=>{
  const dockerfile=await text('Dockerfile');
  expect(dockerfile).toContain('@openai/codex@0.163.0');expect(dockerfile).toContain('@anthropic-ai/claude-code@2.1.304');
+ expect(dockerfile).toContain('ca-certificates');
  expect(dockerfile).not.toContain('mlx-audio');expect(dockerfile).not.toContain('speech/.venv');
  expect(dockerfile).toContain('ARG NARAD_UID=10001');expect(dockerfile).toContain('--uid "$NARAD_UID"');
 });
