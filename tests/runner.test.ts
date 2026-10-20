@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { CallRunner, type CallRecord } from '../server/runner';
-import type { AgentRequest, AgentRunner } from '../server/agent-runner';
+import type { AgentRequest, AgentRunner, AgentUsage } from '../server/agent-runner';
 const dirs: string[] = [];
 afterEach(async () => { for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }); });
 const tmp = async () => { const d = await mkdtemp(join(tmpdir(), 'narad-runner-')); dirs.push(d); return d; };
 const schema = z.object({ ok: z.boolean() });
 const input = (step: 'author' | 'review' = 'author', task = 'r0-s00-p0') => ({ step, task, prompt: 'Hello prompt', schema, images: [], provider: 'codex' as const, timeoutMs: 1000 });
-const fake = (run: (r: AgentRequest, s: AbortSignal) => Promise<unknown>): AgentRunner => ({ run, available: () => [] });
-const setup = async (run: (r: AgentRequest, s: AbortSignal) => Promise<unknown>) => { const dir = await tmp(); const records: CallRecord[] = []; return { dir, records, runner: new CallRunner(dir, fake(run), async c => { records.push(c); }) }; };
+const fake = (run: (r: AgentRequest, s: AbortSignal, p?: (pid: number | null) => void, u?: (usage: AgentUsage) => void) => Promise<unknown>): AgentRunner => ({ run, available: () => [] });
+const setup = async (run: (r: AgentRequest, s: AbortSignal, p?: (pid: number | null) => void, u?: (usage: AgentUsage) => void) => Promise<unknown>) => { const dir = await tmp(); const records: CallRecord[] = []; return { dir, records, runner: new CallRunner(dir, fake(run), async c => { records.push(c); }) }; };
 
 it('numbers calls and writes prompt, result and log files', async () => {
   const { dir, records, runner } = await setup(async () => ({ ok: true }));
@@ -62,4 +62,22 @@ it('passes cwd, name, kind and the JSON schema to the agent runner', async () =>
   await runner.run({ ...input('review'), model: 'm' }, new AbortController().signal);
   expect(seen[0]).toMatchObject({ kind: 'review', cwd: join(dir, 'calls'), name: '001-review-r0-s00-p0', model: 'm', timeoutMs: 1000, provider: 'codex' });
   expect((seen[0].schema as any).properties.ok).toBeDefined();
+});
+
+it('adds up usage across retried attempts and records it on the call', async () => {
+  let n = 0;
+  const { records, runner } = await setup(async (_r, _s, _p, onUsage) => { onUsage?.({ inputTokens: 10, outputTokens: 2, cachedTokens: 4 }); onUsage?.({ inputTokens: 5, outputTokens: 1, costUsd: 0.25 }); return n++ === 0 ? { nope: 1 } : { ok: true }; });
+  await runner.run(input(), new AbortController().signal);
+  expect(records[0].outcome).toBe('retried');
+  expect(records[0].usage).toEqual({ inputTokens: 30, outputTokens: 6, cachedTokens: 8, costUsd: 0.5 });
+});
+it('records no usage when the runner reports none', async () => {
+  const { records, runner } = await setup(async () => ({ ok: true }));
+  await runner.run(input(), new AbortController().signal);
+  expect(records[0].usage).toBeUndefined();
+});
+it('formats the usage line with cost only when known', async () => {
+  const { usageLine } = await import('../src/components/PreparationPanel');
+  expect(usageLine({ inputTokens: 1_200_000, outputTokens: 84_000, cachedTokens: 900_000, costUsd: 3.41 })).toBe('Tokens: 1.2M in · 84k out (cached 900k) · $3.41');
+  expect(usageLine({ inputTokens: 900, outputTokens: 12 })).toBe('Tokens: 900 in · 12 out');
 });

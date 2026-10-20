@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Check, Circle, Copy, FolderOpen, LoaderCircle, RotateCcw, Sparkles, Square, TriangleAlert } from 'lucide-react';
-import type { PreparationSection, PreparationState, Provider } from '../../shared/preparation';
+import type { AgentUsage, PreparationSection, PreparationState, Provider } from '../../shared/preparation';
 import { api } from '../lib/api';
 import { useSettings } from '../lib/settings';
 import { familiarities, familiarityLabels, type Familiarity } from '../../shared/lesson';
 
 const sectionStates: Record<string, string> = { waiting: 'Waiting', writing: 'Writing', reviewing: 'Reviewing', done: 'Done', failed: 'Failed' };
 function duration(ms?: number) { if (ms === undefined) return ''; const total = Math.round(ms / 1000); return total < 60 ? total + 's' : Math.floor(total / 60) + 'm ' + (total % 60) + 's'; }
+function tokens(n: number) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n); }
+export function usageLine(u: AgentUsage) { return 'Tokens: ' + tokens(u.inputTokens) + ' in · ' + tokens(u.outputTokens) + ' out' + (u.cachedTokens ? ' (cached ' + tokens(u.cachedTokens) + ')' : '') + (u.costUsd !== undefined ? ' · $' + u.costUsd.toFixed(2) : ''); }
 function SectionRow({ section }: { section: PreparationSection }) {
   const active = section.state === 'writing' || section.state === 'reviewing';
   return <li className={'section-row state-' + section.state}>
@@ -31,6 +33,7 @@ export function PreparationPanel({bundleId,ready,state,onChanged,onOpenLesson,fa
  return <section className="preparation-panel" aria-label="Lesson preparation"><div className="preparation-heading"><Sparkles size={20}/><div><h2>Turn these sources into a lesson</h2><p>A brief summary, a faithful walkthrough, and a tutor conversation—with the original visuals.</p></div></div>
  {job&&<div className="preparation-status"><strong role="status">{job.stage}</strong>{busy&&job.total>0&&<><progress value={job.completed} max={job.total}/><small>{job.completed} of {job.total} sections checked</small></>}{job.error&&<p className="preparation-error" role="alert">{job.error}</p>}{job.lessonId&&<button className="primary-button" onClick={()=>onOpenLesson(job.lessonId!)}>Open prepared lesson</button>}</div>}
  {job&&(job.sections?.length??0)>0&&<ol className="section-list" aria-label="Sections">{job.sections.map(section=><SectionRow key={section.task} section={section}/>)}</ol>}
+ {job?.usage&&<p className="stage-note usage-line">{usageLine(job.usage)}</p>}
  {job?.folder&&<div className="folder-row"><code className="folder-path">{job.folder}</code><button className="icon-button" onClick={()=>void copyPath()} aria-label="Copy folder path" title={copied?'Copied':'Copy folder path'}>{copied?<Check size={15}/>:<Copy size={15}/>}</button><button className="secondary-button" onClick={()=>void reveal()}><FolderOpen size={15}/>Open folder</button></div>}
  <div className="preparation-actions">{busy?<button className="secondary-button" disabled={pending||job.status==='stopping'} onClick={()=>void act(true)}><Square size={14}/>{job.status==='stopping'?'Stopping…':'Stop preparation'}</button>:<><label>Level<select aria-label="Learner level" value={level} onChange={e=>{setLevel(e.target.value as Familiarity);setConfirm(null)}} disabled={pending||anyBusy}>{familiarities.map(l=><option key={l} value={l}>{familiarityLabels[l]}</option>)}</select></label><label>Prepare with<select aria-label="Preparation agent" value={chosen??provider} onChange={e=>setProvider(e.target.value as Provider)} disabled={pending||anyBusy||!available.length}>{state?.providers.map(p=><option key={p.id} value={p.id} disabled={!p.available}>{p.id==='codex'?'Codex':'Claude'}{!p.available?' · unavailable':''}</option>)}</select></label>
   {resumable&&<button className="primary-button" disabled={disabled} onClick={()=>levelChanged?setConfirm('level'):void act(false,'continue')}>{pending?<LoaderCircle className="spin" size={16}/>:<Sparkles size={16}/>} Continue</button>}

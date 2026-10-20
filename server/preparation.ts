@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { type Provider, type PrepareAction, type PreparationJob, type PreparationState } from '../shared/preparation';
+import { addUsage, type AgentUsage, type Provider, type PrepareAction, type PreparationJob, type PreparationState } from '../shared/preparation';
 import type { Familiarity } from '../shared/lesson';
 import { renderPrompt, type Settings } from '../shared/settings';
 import { LessonStore, StoreError } from './store';
@@ -22,6 +22,8 @@ export type Progress = {
   steps: { research: 'pending' | 'done' | 'skipped'; summary: 'pending' | 'done'; publish: 'pending' | 'done' };
   sections: Record<string, { title: string; sourceHash: string; state: SectionState; attempts: number; durationMs?: number; error?: string }>;
   calls: CallRecord[]; error?: string;
+  /** Sum of every call's usage, retried attempts included. */
+  usage?: AgentUsage;
   /** Where the previously published run was archived (`runs/<runId>`), so publishing puts the old lesson.json beside its settings. */
   previous?: string;
   /** Set (in a locked update) once the previous lesson.json is archived, before the new one is written, so a retried publish never archives twice. */
@@ -114,7 +116,7 @@ export class PreparationService {
       id: slug, bundleId: slug, slug, title, provider: active?.provider ?? progress?.provider ?? 'codex', status, stage: active?.stage ?? stageFor[status],
       completed: sections.filter(s => s.state === 'done').length, total: sections.length,
       createdAt: progress?.startedAt ?? active?.startedAt ?? now, updatedAt: progress?.updatedAt ?? now, sections, folder: this.fs.dir(slug),
-      ...(status === 'completed' && { lessonId: slug }), ...(error && { error }),
+      ...(status === 'completed' && { lessonId: slug }), ...(progress?.usage && { usage: progress.usage }), ...(error && { error }),
     };
   }
   private read(slug: string): Progress | undefined { return this.fs.readJson<Progress>(slug, PROGRESS).value; }
@@ -176,7 +178,7 @@ export class PreparationService {
       this.fs.writeJson(slug, 'preparation/settings.json', settings);
     });
     const dir = join(this.fs.dir(slug), 'preparation');
-    const calls = new CallRunner(dir, this.runner, call => this.update(slug, p => { p.calls.push(call); p.calls.sort((a, b) => a.n - b.n); }));
+    const calls = new CallRunner(dir, this.runner, call => this.update(slug, p => { p.calls.push(call); p.usage = addUsage(p.usage, call.usage); if (!p.usage) delete p.usage; p.calls.sort((a, b) => a.n - b.n); }));
     const prompt = promptKit(settings, level);
     const limits = { chunkChars: settings.preparation.chunkChars, chunkUnits: settings.preparation.chunkUnits };
     const run: Run = (step, task, text, schema, images = []) => {

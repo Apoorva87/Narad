@@ -2,10 +2,10 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { Provider } from '../shared/preparation';
+import { addUsage, type AgentUsage, type Provider } from '../shared/preparation';
 import type { AgentRunner } from './agent-runner';
 
-export type CallRecord = { n: number; step: string; task: string; startedAt: string; durationMs: number; outcome: 'ok' | 'retried' | 'failed'; error?: string };
+export type CallRecord = { n: number; step: string; task: string; startedAt: string; durationMs: number; outcome: 'ok' | 'retried' | 'failed'; error?: string; usage?: AgentUsage };
 export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number };
 
 /**
@@ -33,13 +33,14 @@ export class CallRunner {
     const startedAt = new Date().toISOString();
     const started = Date.now();
     const errors: string[] = [];
+    let usage: AgentUsage | undefined;
     const finish = async (outcome: CallRecord['outcome'], error?: string) => {
       await writeFile(base + '.log', `${name}\nstarted ${startedAt}\noutcome ${outcome}\n${errors.map((e, i) => `attempt ${i + 1} failed: ${e}\n`).join('')}`);
-      await this.record({ n, step: input.step, task: input.task, startedAt, durationMs: Date.now() - started, outcome, ...(error ? { error } : {}) });
+      await this.record({ n, step: input.step, task: input.task, startedAt, durationMs: Date.now() - started, outcome, ...(error ? { error } : {}), ...(usage ? { usage } : {}) });
     };
     for (let attempt = 1; ; attempt++) {
       try {
-        const raw = await this.runner.run({ provider: input.provider, kind: input.step, prompt: input.prompt, schema, cwd: calls, name, images: input.images, model: input.model, timeoutMs: input.timeoutMs }, signal, onSession);
+        const raw = await this.runner.run({ provider: input.provider, kind: input.step, prompt: input.prompt, schema, cwd: calls, name, images: input.images, model: input.model, timeoutMs: input.timeoutMs }, signal, onSession, u => { usage = addUsage(usage, u); });
         signal.throwIfAborted();
         const value = input.schema.parse(raw);
         await writeFile(base + '.result.json', JSON.stringify(value, null, 2));

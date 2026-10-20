@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LessonStore } from '../server/store';
 import { PreparationService } from '../server/preparation';
-import type { AgentRequest } from '../server/agent-runner';
+import type { AgentRequest, AgentUsage } from '../server/agent-runner';
 import sharp from 'sharp';
 const dirs:string[]=[];const stores:LessonStore[]=[];const services:PreparationService[]=[];
 afterEach(async()=>{for(const s of services.splice(0)) await s.shutdown();for(const s of stores.splice(0))s.close();for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true})});
-async function setup(run:(r:AgentRequest,s:AbortSignal)=>Promise<unknown>){const dir=await mkdtemp(join(tmpdir(),'narad-job-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown:'# Time\n\nA delay of 42 ms.',assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);return {dir,store,service}}
+async function setup(run:(r:AgentRequest,s:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(u:AgentUsage)=>void)=>Promise<unknown>){const dir=await mkdtemp(join(tmpdir(),'narad-job-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown:'# Time\n\nA delay of 42 ms.',assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);return {dir,store,service}}
 const answer=async(r:AgentRequest)=>{if(r.kind==='review')return{approved:true,issues:[]};if(r.kind==='summary')return{sections:[{title:'In brief',markdown:'A delay is measured in milliseconds.',spokenText:'A delay is measured in milliseconds.',sourceIds:['a']},{title:'Takeaway',markdown:'Measure the delay between events.',spokenText:'Measure the delay between events.',sourceIds:['a']}]} ;return{id:'s00',introduction:'Learn delay.',hostQuestion:'What is delay?',units:[{id:'s00-u00',walkthrough:'The 42 ms delay is elapsed time between two events.',walkthroughSpoken:'Forty two milliseconds is elapsed time between events.',dialogue:'Imagine timing two events with a stopwatch: the delay is 42 ms.',dialogueSpoken:'Imagine timing two events with a stopwatch.',question:null}],visuals:[]}};
 async function finished(service:PreparationService){await expect.poll(()=>['running','stopping'].includes(service.state().jobs[0]?.status??'running'),{timeout:3000}).toBe(false);return service.state().jobs[0]}
 it('prepares, reviews and saves three distinct modes with a persisted job',async()=>{const {service,store}=await setup(answer);service.start('source','codex');const job=await finished(service);expect(job.status).toBe('completed');const lesson=store.get(job.lessonId!)!;expect(Object.keys(lesson.modes)).toEqual(['summary','walkthrough','dialogue']);expect(store.getBundle('source')!.lessonId).toBe(lesson.id);expect(service.state().jobs[0].status).toBe('completed')});
@@ -154,3 +154,14 @@ it('never overwrites the archived previous lesson when publishing is retried aft
  const published=(await readdir(join(t.folder,'runs'))).filter(r=>!r.endsWith('-abandoned'));
  expect(published).toHaveLength(1);expect(await readFile(join(t.folder,'runs',published[0],'lesson.json'),'utf8')).toBe(original);
 });
+
+it('sums token usage over every call and attempt and persists it with the run',async()=>{
+ let reviews=0;
+ const {service,store}=await setup(async(r,_s,_p,onUsage)=>{onUsage?.({inputTokens:100,outputTokens:10,cachedTokens:50,costUsd:0.5});if(r.kind==='review'&&reviews++===0)return{approved:false,issues:['Not yet.']};return answer(r)});
+ service.start('source','codex');const job=await finished(service);expect(job.status).toBe('completed');
+ const {readFileSync}=await import('node:fs');const progress=JSON.parse(readFileSync(join(store.libraryRoot,'time','preparation','progress.json'),'utf8'));
+ const calls=progress.calls.length;expect(calls).toBeGreaterThan(2);
+ expect(job.usage).toEqual({inputTokens:100*calls,outputTokens:10*calls,cachedTokens:50*calls,costUsd:0.5*calls});
+ expect(progress.usage).toEqual(job.usage);
+});
+it('reports no usage when the agent gives none',async()=>{const {service}=await setup(answer);service.start('source','codex');const job=await finished(service);expect(job.usage).toBeUndefined()});
