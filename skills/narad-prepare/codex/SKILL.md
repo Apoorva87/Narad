@@ -19,7 +19,7 @@ The API defaults to http://127.0.0.1:4318 (`NARAD_API_URL` overrides it). If `no
    It prints the item slug and any capture warnings. `note:` warnings (interactive figures, merged tables) do not block preparation; they appear as "Not captured" notes in the lesson. `BLOCKING:` warnings (article text or an image failed to save) must be fixed before preparing — tell the user; retrying the source in the app usually resolves it.
 3. Start preparation with the agent the user prefers (default codex):
    `node --import tsx scripts/narad.ts prepare <slug> codex`
-   Only one item is prepared at a time. If another preparation is running, report it; do not stop it without the user's direction.
+   If every preparation slot is busy (Settings → Preparation → Lessons at once), Narad queues the item automatically and prints `Queued (position N)`; it starts on its own when a slot frees up. Report the queue position to the user. Never stop someone else's run to make room.
 4. Check progress at sensible intervals (a long article can take an hour or more):
    `node --import tsx scripts/narad.ts status <slug>`
    Only status `completed` means a lesson was published. Report `failed`, `stopped` or `interrupted` honestly with the error shown.
@@ -28,7 +28,7 @@ The API defaults to http://127.0.0.1:4318 (`NARAD_API_URL` overrides it). If `no
 ## Continue, start over, stop
 
 - Interrupted, stopped, or failed runs keep their finished sections. `prepare <slug> <agent>` continues from the first unfinished section. Add `--restart` only when the user explicitly wants to start over (finished sections are archived, not deleted). Changing `--level` on a run in progress also starts over.
-- `node --import tsx scripts/narad.ts stop <slug>` stops only that item's run. Never kill unrelated Codex or Claude processes.
+- `node --import tsx scripts/narad.ts stop <slug>` stops only that item's run, or removes it from the queue if it is still waiting. Never kill unrelated Codex or Claude processes.
 
 ## Limits
 

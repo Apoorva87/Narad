@@ -7,7 +7,7 @@ import { LessonStore } from '../server/store';
 import { createApp } from '../server/app';
 import { TutorStore } from '../server/tutor-store';
 import { TutorService } from '../server/tutor';
-import type { PreparationService } from '../server/preparation';
+import { PreparationService } from '../server/preparation';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { minimalLesson } from './fixture';
 import { prepareSources } from '../server/intake';
@@ -217,7 +217,7 @@ it('refuses to publish a second lesson into an occupied collection folder', asyn
 });
 it('moves reading positions and tutor threads with either rename, and refuses renames while preparing', async () => {
   let busy = false;
-  const preparation = { busy: () => busy } as unknown as PreparationService;
+  const preparation = { busy: () => busy, dequeue: async () => false } as unknown as PreparationService;
   const turns = new TutorStore(':memory:');
   const tutor = new TutorService(store = new LessonStore(':memory:'), turns, store.libraryRoot, { available: () => [], run: async () => ({}) });
   server = createApp(store, preparation, undefined, { tutor }).listen(0, '127.0.0.1');
@@ -265,4 +265,26 @@ it('refuses library media that is a symlink, or reached through one, pointing ou
   expect(store.mediaPath(other, 'inside.png')).toBeUndefined();
   expect(await requestStatus(base, 'GET', '/api/library/' + other + '/media/inside.png', {})).toBe(404);
   rmSync(outside, { recursive: true, force: true });
+});
+
+it('queues a preparation with 202 instead of refusing while another lesson is preparing, and dequeues it on rename', async () => {
+  store = new LessonStore(':memory:');
+  const article = (title: string) => ({ id: title.toLowerCase(), title, text: 'Explain', createdAt: new Date().toISOString(), status: 'captured' as const, sources: [{ id: 'a', title, kind: 'article' as const, markdown: '# T\n\nA delay of 42 ms.', assets: [], warnings: [], inventory: { images: 0, inlineSvg: 0, tables: 0, savedVisuals: 0 } }] });
+  store.saveBundle(article('First'), []); store.saveBundle(article('Second'), []);
+  const preparation = new PreparationService(store, mkdtempSync(join(tmpdir(), 'narad-api-prep-')), { run: (_request, signal) => new Promise((_resolve, reject) => { if (signal.aborted) reject(signal.reason); else signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }), available: () => [{ id: 'codex', available: true }] });
+  server = createApp(store, preparation).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+  try {
+    const prepare = (id: string) => fetch(base + '/api/source-bundles/' + id + '/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'codex' }) });
+    const first = await prepare('first'); expect(first.status).toBe(202); expect((await first.json()).status).toBe('running');
+    const second = await prepare('second'); expect(second.status).toBe(202); expect(await second.json()).toMatchObject({ status: 'queued', queuePosition: 1, queueLength: 1 });
+    const state = await (await fetch(base + '/api/preparation')).json();
+    expect(state.jobs.find((job: { slug: string }) => job.slug === 'second').status).toBe('queued');
+    const renamed = await fetch(base + '/api/source-bundles/second', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Renamed' }) });
+    expect(renamed.status).toBe(200);
+    expect(preparation.state().jobs.find(job => job.slug === 'renamed')?.status).toBe('stopped');
+    const refused = await fetch(base + '/api/source-bundles/first', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Blocked' }) });
+    expect(refused.status).toBe(409);
+  } finally { await preparation.shutdown(); }
 });

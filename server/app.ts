@@ -35,7 +35,10 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const current = store.getSettings() as unknown as Record<string, Record<string, unknown>>;
     const patch = z.record(z.string(), z.record(z.string(), z.unknown())).parse(req.body);
     const merged = Object.fromEntries(Object.entries(current).map(([section, values]) => [section, { ...values, ...(patch[section] ?? {}) }]));
-    res.json({ settings: store.saveSettings(settingsSchema.parse(merged) as Settings), defaults: defaultSettings });
+    const settings = store.saveSettings(settingsSchema.parse(merged) as Settings);
+    // A raised "Lessons at once" starts waiting lessons right away.
+    preparation?.settingsChanged();
+    res.json({ settings, defaults: defaultSettings });
   });
   const narration = () => { if (!speech) throw new StoreError('Local narration is not enabled in this server.',503); return speech; };
   app.get('/api/speech', (_req,res)=>res.json(narration().status()));
@@ -82,7 +85,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const { provider, familiarity, action } = prepareInput.parse(req.body);
     res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity, action));
   });
-  app.post('/api/preparation/:id/stop', (req, res) => res.json(jobs().stop(req.params.id)));
+  app.post('/api/preparation/:id/stop', async (req, res) => res.json(await jobs().stop(req.params.id)));
   let capturing = false;
   app.get('/api/source-bundles', (_req, res) => res.json(store.listBundles()));
   app.post('/api/source-bundles', async (req, res) => {
@@ -112,12 +115,15 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   const deleteBundle = async (id: string) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before deleting.', 409);
     id = bundleSlug(id);
+    await preparation?.dequeue(id);
     if (preparation?.busy(id)) throw new StoreError('Stop preparation before deleting these sources.', 409);
     const jobs = store.deleteBundle(id);
     await preparation?.forget(jobs);
   };
-  app.patch('/api/source-bundles/:id', (req, res) => {
+  app.patch('/api/source-bundles/:id', async (req, res) => {
     const slug = bundleSlug(req.params.id);
+    // A queued item leaves the queue first; a running one must be stopped.
+    await preparation?.dequeue(slug);
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
     const bundle = store.renameBundle(slug, renameInput.parse(req.body).title);
     // The lesson, if any, shares this folder; its tutor threads follow the new slug.
@@ -179,8 +185,9 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     // The source collection link is local to this library; an import elsewhere would reject it.
     res.json(parseLesson({ ...lesson, sourceBundleId: undefined }));
   });
-  app.patch('/api/lessons/:id', (req, res) => {
+  app.patch('/api/lessons/:id', async (req, res) => {
     const slug = lessonSlug(req.params.id);
+    await preparation?.dequeue(slug);
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
     const lesson = store.renameLesson(slug, renameInput.parse(req.body).title);
     if (lesson.id !== slug) options.tutor?.moveLesson(slug, lesson.id);
@@ -191,6 +198,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const slug = store.resolveId(req.params.id);
     if (!slug || !store.list().some(item => item.id === slug)) throw new StoreError('Analysis not found.', 404);
     const bundleId = req.query.sources === 'true' && store.listBundles().some(item => item.id === slug) ? slug : undefined;
+    if (bundleId) await preparation?.dequeue(bundleId);
     if (bundleId && (capturing || preparation?.busy(bundleId))) throw new StoreError('Stop preparation before deleting these sources.', 409);
     store.deleteLesson(slug);
     options.tutor?.deleteLesson(slug);

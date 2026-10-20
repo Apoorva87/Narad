@@ -16,9 +16,10 @@ import { secureAgentPrompt, untrustedData } from './prompt-security';
 import { agentSectionSchema, authorBatchSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, normalizeTeaching, reconcileReviewIssues, researchSchema, reviewBatchSchema, reviewSchema, sectionHash, summarySchema, type TeachingTask } from './generation-content';
 
 type SectionState = 'waiting' | 'writing' | 'reviewing' | 'done' | 'failed';
+type RunStatus = 'running' | 'interrupted' | 'stopped' | 'failed' | 'completed';
 /** `preparation/progress.json`: one item's run state, per-section state and per-call records. */
 export type Progress = {
-  runId: string; status: 'running' | 'interrupted' | 'stopped' | 'failed' | 'completed'; provider: Provider; level: Familiarity;
+  runId: string; status: RunStatus | 'queued'; provider: Provider; level: Familiarity;
   startedAt: string; updatedAt: string;
   steps: { research: 'pending' | 'done' | 'skipped'; summary: 'pending' | 'done'; publish: 'pending' | 'done' };
   sections: Record<string, { title: string; sourceHash: string; state: SectionState; attempts: number; durationMs?: number; error?: string }>;
@@ -29,17 +30,28 @@ export type Progress = {
   previous?: string;
   /** Set (in a locked update) once the previous lesson.json is archived, before the new one is written, so a retried publish never archives twice. */
   archivedLesson?: string;
+  /** When the item joined the queue, and what was asked for. Shown in the Agents list; the queue itself is kept in memory. */
+  queuedAt?: string; request?: { familiarity?: Familiarity; action: PrepareAction };
+  /**
+   * The status before the item was queued (`none`: never prepared, so this file is only a placeholder). Kept until a run
+   * actually starts, so a queued "new version" of a published lesson still archives that lesson when it runs.
+   */
+  beforeQueue?: RunStatus | 'none';
 };
 type SavedSection = { task: string; title: string; sourceHash: string; teaching: AuthoredSection };
-type Active = { slug: string; title: string; provider: Provider; stage: string; stopping: boolean; startedAt: string; controller: AbortController; done: Promise<void> };
+type Session = PreparationState['sessions'][number];
+/** One running lesson. Everything a run owns — its abort controller, stage text, live agent sessions — lives here, so runs never share state. */
+type Active = { slug: string; title: string; provider: Provider; stage: string; stopping: boolean; startedAt: string; controller: AbortController; done: Promise<void>; sessions: Session[] };
+type Queued = { slug: string; provider: Provider; familiarity?: Familiarity; action: PrepareAction };
 type Run = (step: CallInput['step'], task: string, text: string, schema: CallInput['schema'], images?: string[], options?:Pick<CallInput,'multiAgent'|'reasoningEffort'>) => Promise<unknown>;
 
 const PROGRESS = 'preparation/progress.json';
 const INTERRUPTED = 'Preparation was interrupted when the server stopped. Finished sections are saved; press Continue to resume.';
+const QUEUE_INTERRUPTED = 'Not started — the server restarted while it was queued';
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 3000);
 const stageFor: Record<PreparationJob['status'], string> = {
-  running: 'Preparing', stopping: 'Stopping agent…', completed: 'Lesson ready · all three modes saved', failed: 'Preparation needs attention',
+  queued: 'Queued', running: 'Preparing', stopping: 'Stopping agent…', completed: 'Lesson ready · all three modes saved', failed: 'Preparation needs attention',
   stopped: 'Stopped · finished sections kept', cancelled: 'Stopped', interrupted: 'Interrupted when the server stopped · finished sections kept',
 };
 const levelKey: Record<Familiarity, 'levelFoundational' | 'levelSomeBackground' | 'levelAdvanced'> = { foundational: 'levelFoundational', 'some-background': 'levelSomeBackground', advanced: 'levelAdvanced' };
@@ -58,71 +70,153 @@ function progressIssue(issues:string[]):string{
 }
 
 /**
- * Prepares one library item at a time. Progress lives in the item's `preparation/` folder: each finished section is saved
- * as its own file, so a stopped, failed or interrupted run continues where it left off when the user asks. Nothing resumes on its own.
+ * Prepares up to `preparation.lessonsAtOnce` library items at the same time; further starts wait in a first-in, first-out
+ * queue and start, in order, whenever a run ends or the setting is raised. Progress lives in each item's `preparation/` folder:
+ * each finished section is saved as its own file, so a stopped, failed or interrupted run continues where it left off when the
+ * user asks. Nothing resumes or starts on its own after a restart — a queued item becomes interrupted.
  */
 export class PreparationService {
-  private active?: Active;
-  private sessions: PreparationState['sessions'] = [];
+  private active = new Map<string, Active>();
+  private queue: Queued[] = [];
   private closing = false;
   private fs: LibraryFs;
-  /** Settles once startup has marked runs left `running` as interrupted. */
+  /** Settles once startup has marked runs left `running` or `queued` as interrupted. */
   readonly ready: Promise<void>;
   constructor(private store: LessonStore, private dataDir: string, private runner: AgentRunner = cliRunner, private download?: Download) {
     this.fs = store.library;
-    const marking = this.fs.slugs().filter(slug => this.read(slug)?.status === 'running')
-      .map(slug => this.update(slug, p => { if (p.status === 'running') { p.status = 'interrupted'; p.error = INTERRUPTED; this.settle(p); } }));
+    const marking = this.fs.slugs().filter(slug => { const status = this.read(slug)?.status; return status === 'running' || status === 'queued'; })
+      .map(slug => this.update(slug, p => {
+        if (p.status === 'running') { p.status = 'interrupted'; p.error = INTERRUPTED; this.settle(p); }
+        else if (p.status === 'queued') { p.status = 'interrupted'; p.error = QUEUE_INTERRUPTED + '. Press Continue to start it.'; }
+      }));
     this.ready = Promise.all(marking).then(() => undefined, error => console.error('Could not mark interrupted preparations:', error));
   }
-  state(): PreparationState { return { jobs: this.jobs(), sessions: [...this.sessions], providers: this.runner.available() }; }
+  state(): PreparationState { return { jobs: this.jobs(), sessions: [...this.active.values()].flatMap(active => active.sessions), providers: this.runner.available() }; }
+  /** Starts now when a slot is free, otherwise queues the item. Starting an item that is already running or queued returns its current job. */
   start(bundleId: string, provider: Provider, familiarity?: Familiarity, action: PrepareAction = 'continue'): PreparationJob {
     if (this.closing) throw new StoreError('The server is shutting down.', 503);
-    if (this.active) throw new StoreError('A preparation is already running. Stop it or wait for it to finish.', 409);
+    const slug = this.store.resolveId(bundleId) ?? bundleId;
+    if (this.active.has(slug) || this.queued(slug) >= 0) return this.job(slug, this.read(slug));
     if (!this.runner.available().some(p => p.id === provider && p.available)) throw new StoreError('This agent is not available. Install it and sign in from a terminal, then restart Narad if PATH changed.', 400);
-    const found = this.store.getBundle(bundleId); if (!found) throw new StoreError('Source collection not found.', 404);
-    const bundle = familiarity && familiarity !== found.familiarity ? this.store.saveBundle({ ...found, familiarity }, []) : found;
-    buildTeachingPlan(bundle);
-    const active: Active = { slug: bundle.id, title: bundle.title, provider, stage: 'Starting preparation', stopping: false, startedAt: new Date().toISOString(), controller: new AbortController(), done: Promise.resolve() };
-    this.active = active;
-    active.done = this.prepare(active, action, this.store.getSettings())
-      .catch(error => this.finishFailed(active, error))
-      .catch(error => console.error('Could not record the preparation outcome:', error))
-      .finally(() => { this.sessions = []; if (this.active === active) this.active = undefined; });
-    return this.job(active.slug, this.read(active.slug));
+    const found = this.store.getBundle(slug); if (!found) throw new StoreError('Source collection not found.', 404);
+    buildTeachingPlan(found);
+    if (this.active.size < this.limit()) return this.launch({ slug: found.id, provider, familiarity, action });
+    return this.enqueue({ slug: found.id, provider, familiarity, action }, found.familiarity ?? 'foundational');
   }
-  stop(id: string): PreparationJob {
+  async stop(id: string): Promise<PreparationJob> {
     const slug = this.store.resolveId(id) ?? id;
-    if (this.active?.slug === slug) {
-      this.active.stopping = true; this.active.stage = 'Stopping agent…'; this.active.controller.abort();
+    const active = this.active.get(slug);
+    if (active) {
+      active.stopping = true; active.stage = 'Stopping agent…'; active.controller.abort();
       return this.job(slug, this.read(slug));
     }
+    if (await this.dequeue(slug)) return this.job(slug, this.read(slug));
     const existing = this.jobs().find(job => job.id === slug);
     if (existing) return existing;
     throw new StoreError('Preparation not found.', 404);
   }
-  /** True while this collection is being prepared, matching old IDs and renamed slugs alike. */
-  busy(bundleId: string) { const active = this.active?.slug; if (!active) return false; return active === bundleId || this.store.resolveId(bundleId) === active; }
+  /**
+   * Takes a queued item out of the queue and records it as stopped (a queued new version of a published lesson goes back to
+   * completed). Finished sections are untouched. Resolves false when the item was not queued. Called before delete and rename.
+   */
+  async dequeue(id: string): Promise<boolean> {
+    const slug = this.store.resolveId(id) ?? id;
+    const index = this.queued(slug); if (index < 0) return false;
+    this.queue.splice(index, 1);
+    await this.update(slug, p => {
+      if (p.status !== 'queued') return;
+      const before = p.beforeQueue;
+      p.status = before === 'completed' ? 'completed' : 'stopped';
+      delete p.queuedAt; delete p.request; delete p.error;
+      if (before !== 'none') delete p.beforeQueue;
+    });
+    return true;
+  }
+  /** Lets queued items use slots freed by a raised `lessonsAtOnce`. Lowering it never stops a running lesson. */
+  settingsChanged() { this.pump(); }
+  /** True while this collection is being prepared (not merely queued), matching old IDs and renamed slugs alike. */
+  busy(bundleId: string) { return this.active.has(bundleId) || [...this.active.keys()].includes(this.store.resolveId(bundleId) ?? ''); }
   /** Deletes drafts that older versions of Narad kept outside the library folders. */
   async forget(jobs: { id: string }[]) { await Promise.all(jobs.map(job => rm(join(this.dataDir, 'preparations', job.id), { recursive: true, force: true }))); }
-  async shutdown() { this.closing = true; if (this.active) { this.active.controller.abort(); await this.active.done; } await this.ready; }
+  /** Stops every running lesson (they become interrupted) and waits for all of them. Queued items stay queued on disk and become interrupted on the next start. */
+  async shutdown() {
+    this.closing = true; this.queue = [];
+    const running = [...this.active.values()];
+    for (const active of running) active.controller.abort();
+    await Promise.all(running.map(active => active.done));
+    await this.ready;
+  }
 
-  /** Runs found across item folders, newest first; a `running` file with no live run is reported as interrupted. */
+  private limit() { return this.store.getSettings().preparation.lessonsAtOnce; }
+  private queued(slug: string) { return this.queue.findIndex(entry => entry.slug === slug); }
+  /** Starts the oldest queued items while slots are free. A queued item that can no longer start is marked failed and skipped. */
+  private pump() {
+    while (!this.closing && this.queue.length && this.active.size < this.limit()) {
+      const next = this.queue.shift()!;
+      try {
+        if (!this.store.getBundle(next.slug)) throw new StoreError('Source collection not found.', 404);
+        if (!this.runner.available().some(p => p.id === next.provider && p.available)) throw new StoreError('This agent is not available. Install it and sign in from a terminal, then restart Narad if PATH changed.', 400);
+        this.launch(next);
+      } catch (error) {
+        this.update(next.slug, p => { if (p.status === 'queued') { p.status = 'failed'; p.error = message(error); delete p.queuedAt; delete p.request; } })
+          .catch(failure => console.error('Could not record a queued preparation that failed to start:', failure));
+      }
+    }
+  }
+  private enqueue(entry: Queued, level: Familiarity): PreparationJob {
+    this.queue.push(entry);
+    const now = new Date().toISOString();
+    const mark = (p: Progress) => {
+      p.beforeQueue ??= p.status === 'queued' ? 'none' : p.status;
+      p.status = 'queued'; p.provider = entry.provider; p.queuedAt = now; p.request = { ...(entry.familiarity && { familiarity: entry.familiarity }), action: entry.action };
+    };
+    const prior = this.read(entry.slug);
+    const placeholder: Progress = { runId: stamp(), status: 'queued', provider: entry.provider, level, startedAt: now, updatedAt: now, steps: { research: 'pending', summary: 'pending', publish: 'pending' }, sections: {}, calls: [], beforeQueue: 'none' };
+    if (prior) mark(prior); else mark(placeholder);
+    // Written under the item's lock, so a later start (prepare) or removal (dequeue) always sees it; the in-memory queue is authoritative meanwhile.
+    void this.fs.withLock(entry.slug, async () => {
+      const progress = this.read(entry.slug) ?? placeholder;
+      mark(progress); progress.updatedAt = new Date().toISOString();
+      this.fs.writeJson(entry.slug, PROGRESS, progress);
+    }).catch(error => console.error('Could not record the queued preparation:', error));
+    return this.job(entry.slug, prior ?? placeholder);
+  }
+  private launch({ slug, provider, familiarity, action }: Queued): PreparationJob {
+    const found = this.store.getBundle(slug)!;
+    const bundle = familiarity && familiarity !== found.familiarity ? this.store.saveBundle({ ...found, familiarity }, []) : found;
+    buildTeachingPlan(bundle);
+    const active: Active = { slug: bundle.id, title: bundle.title, provider, stage: 'Starting preparation', stopping: false, startedAt: new Date().toISOString(), controller: new AbortController(), done: Promise.resolve(), sessions: [] };
+    this.active.set(active.slug, active);
+    active.done = this.prepare(active, action, this.store.getSettings())
+      .catch(error => this.finishFailed(active, error))
+      .catch(error => console.error('Could not record the preparation outcome:', error))
+      .finally(() => { active.sessions = []; if (this.active.get(active.slug) === active) this.active.delete(active.slug); this.pump(); });
+    return this.job(active.slug, this.read(active.slug));
+  }
+
+  /** Runs found across item folders, newest first; a `running` or `queued` file with no live run or queue entry is reported as interrupted. */
   private jobs(): PreparationJob[] {
     const jobs = this.fs.slugs().flatMap(slug => { const progress = this.read(slug); return progress ? [this.job(slug, progress)] : []; });
-    if (this.active && !jobs.some(job => job.slug === this.active!.slug)) jobs.push(this.job(this.active.slug, undefined));
+    for (const slug of [...this.active.keys(), ...this.queue.map(entry => entry.slug)]) if (!jobs.some(job => job.slug === slug)) jobs.push(this.job(slug, undefined));
     return jobs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50);
   }
   private job(slug: string, progress: Progress | undefined): PreparationJob {
-    const active = this.active?.slug === slug ? this.active : undefined;
-    const status: PreparationJob['status'] = active ? (active.stopping ? 'stopping' : 'running') : progress?.status === 'running' ? 'interrupted' : progress?.status ?? 'running';
+    const active = this.active.get(slug);
+    const position = this.queued(slug) + 1;
+    const status: PreparationJob['status'] = active ? (active.stopping ? 'stopping' : 'running') : position ? 'queued'
+      : progress?.status === 'running' || progress?.status === 'queued' ? 'interrupted' : progress?.status ?? 'running';
     const sections = Object.entries(progress?.sections ?? {}).map(([task, s]) => ({ task, title: s.title, state: s.state, ...(s.durationMs !== undefined && { durationMs: s.durationMs }), ...(s.error && { error: s.error }) }));
     const title = active?.title ?? this.fs.readJson<{ title?: string }>(slug, 'item.json').value?.title ?? slug;
-    const error = active ? undefined : status === 'interrupted' ? progress?.error ?? INTERRUPTED : progress?.error;
+    const neverStarted = status === 'interrupted' && (progress?.status === 'queued' || progress?.beforeQueue !== undefined);
+    const error = active || position ? undefined : status === 'interrupted' ? progress?.error ?? (neverStarted ? QUEUE_INTERRUPTED + '. Press Continue to start it.' : INTERRUPTED) : progress?.error;
+    const stage = active?.stage ?? (position ? `Queued · position ${position} of ${this.queue.length}` : neverStarted ? QUEUE_INTERRUPTED : stageFor[status]);
     const now = new Date().toISOString();
+    const queuedEntry = position ? this.queue[position - 1] : undefined;
     return {
-      id: slug, bundleId: slug, slug, title, provider: active?.provider ?? progress?.provider ?? 'codex', status, stage: active?.stage ?? stageFor[status],
+      id: slug, bundleId: slug, slug, title, provider: active?.provider ?? queuedEntry?.provider ?? progress?.provider ?? 'codex', status, stage,
       completed: sections.filter(s => s.state === 'done').length, total: sections.length,
       createdAt: progress?.startedAt ?? active?.startedAt ?? now, updatedAt: progress?.updatedAt ?? now, sections, folder: this.fs.dir(slug),
+      ...(position && { queuePosition: position, queueLength: this.queue.length }),
       ...(status === 'completed' && { lessonId: slug }), ...(progress?.usage && { usage: progress.usage }), ...(error && { error }),
     };
   }
@@ -140,7 +234,7 @@ export class PreparationService {
   private async finishFailed(active: Active, error: unknown) {
     const aborted = active.controller.signal.aborted;
     // Stop → stopped; server shutdown → interrupted (the user did not ask to stop); anything else → failed with its error.
-    const status: Progress['status'] = !aborted ? 'failed' : active.stopping ? 'stopped' : 'interrupted';
+    const status: RunStatus = !aborted ? 'failed' : active.stopping ? 'stopped' : 'interrupted';
     await this.update(active.slug, p => {
       p.status = status;
       if (status === 'failed') p.error = message(error); else if (status === 'interrupted') p.error = INTERRUPTED; else delete p.error;
@@ -169,17 +263,20 @@ export class PreparationService {
     let bundle = this.store.getBundle(slug)!;
     const level = bundle.familiarity ?? 'foundational';
     await this.fs.withLock(slug, async () => {
-      const prior = this.read(slug);
+      const read = this.read(slug);
+      // A placeholder written while the item was queued holds no run of its own.
+      const prior = read?.beforeQueue === 'none' ? undefined : read;
+      const priorStatus = prior?.beforeQueue ?? prior?.status;
       let keep: Progress | undefined, previous: string | undefined;
       // A published run is kept whole, with the settings its lesson used; a run for another level, or Start over, is set aside.
-      if (prior?.status === 'completed') previous = this.archive(slug, prior.runId, ['sections', 'calls', 'progress.json', 'settings.json']);
+      if (priorStatus === 'completed') previous = this.archive(slug, prior!.runId, ['sections', 'calls', 'progress.json', 'settings.json']);
       else if (prior && (action === 'restart' || prior.level !== level)) this.archive(slug, stamp() + '-abandoned', ['sections', 'calls', 'progress.json']);
       else keep = prior;
       const now = new Date().toISOString();
       const progress: Progress = keep
         ? { ...keep, status: 'running', provider, level, updatedAt: now }
         : { runId: stamp(), status: 'running', provider, level, startedAt: now, updatedAt: now, steps: { research: 'pending', summary: 'pending', publish: 'pending' }, sections: {}, calls: [], ...(previous && { previous }) };
-      delete progress.error;
+      delete progress.error; delete progress.queuedAt; delete progress.request; delete progress.beforeQueue;
       this.fs.writeJson(slug, PROGRESS, progress);
       // The settings this attempt uses, kept beside its sections so a lesson's instructions stay inspectable.
       this.fs.writeJson(slug, 'preparation/settings.json', settings);
@@ -189,11 +286,11 @@ export class PreparationService {
     const prompt = promptKit(settings, level);
     const limits = { chunkChars: settings.preparation.chunkChars, chunkUnits: settings.preparation.chunkUnits };
     const run: Run = (step, task, text, schema, images = [], options = {}) => {
-      let session: PreparationState['sessions'][number] | undefined;
+      let session: Session | undefined;
       return calls.run({ step, task, prompt: secureAgentPrompt(text, provider, images), schema, images, provider, model: (provider === 'codex' ? settings.preparation.codexModel : settings.preparation.claudeModel) || undefined, timeoutMs: settings.preparation.timeoutMinutes * 60_000, ...(provider==='codex'&&{reasoningEffort:settings.preparation.codexReasoning}), ...options }, signal, pid => {
-        if (session) this.sessions = this.sessions.filter(s => s !== session);
-        session = pid ? { jobId: slug, provider, pid, startedAt: new Date().toISOString() } : undefined;
-        if (session) this.sessions = [...this.sessions, session];
+        if (session) active.sessions = active.sessions.filter(s => s !== session);
+        session = pid ? { jobId: slug, slug, provider, pid, startedAt: new Date().toISOString() } : undefined;
+        if (session) active.sessions = [...active.sessions, session];
       });
     };
 

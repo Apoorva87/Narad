@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LessonStore } from '../server/store';
 import { PreparationService } from '../server/preparation';
@@ -12,7 +13,7 @@ async function setup(run:(r:AgentRequest,s:AbortSignal,onSession?:(pid:number|nu
 const answer=async(r:AgentRequest)=>{if(r.kind==='review')return{approved:true,issues:[]};if(r.kind==='summary')return{sections:[{title:'In brief',markdown:'A delay is measured in milliseconds.',spokenText:'A delay is measured in milliseconds.',sourceIds:['a']},{title:'Takeaway',markdown:'Measure the delay between events.',spokenText:'Measure the delay between events.',sourceIds:['a']}]} ;return{id:'s00',introduction:'Learn delay.',hostQuestion:'What is delay?',units:[{id:'s00-u00',walkthrough:'The 42 ms delay is elapsed time between two events.',walkthroughSpoken:'Forty two milliseconds is elapsed time between events.',dialogue:'Imagine timing two events with a stopwatch: the delay is 42 ms.',dialogueSpoken:'Imagine timing two events with a stopwatch.',question:null}],visuals:[]}};
 async function finished(service:PreparationService){await expect.poll(()=>['running','stopping'].includes(service.state().jobs[0]?.status??'running'),{timeout:3000}).toBe(false);return service.state().jobs[0]}
 it('prepares, reviews and saves three distinct modes with a persisted job',async()=>{const {service,store}=await setup(answer);service.start('source','codex');const job=await finished(service);expect(job.status).toBe('completed');const lesson=store.get(job.lessonId!)!;expect(Object.keys(lesson.modes)).toEqual(['summary','walkthrough','dialogue']);expect(store.getBundle('source')!.lessonId).toBe(lesson.id);expect(service.state().jobs[0].status).toBe('completed')});
-it('allows one job at a time and never publishes after cancellation even if a provider returns late',async()=>{let release!:(v:unknown)=>void;const {service,store}=await setup(()=>new Promise(r=>release=r));const job=service.start('source','codex');expect(()=>service.start('source','claude')).toThrow(/already|running/i);await expect.poll(()=>!!release).toBe(true);service.stop(job.id);release(await answer({kind:'author'} as AgentRequest));await expect.poll(()=>service.state().jobs[0].status).toBe('stopped');expect(store.list()).toEqual([])});
+it('never duplicates a running item and never publishes after cancellation even if a provider returns late',async()=>{let release!:(v:unknown)=>void;const {service,store}=await setup(()=>new Promise(r=>release=r));const job=service.start('source','codex');const again=service.start('source','claude');expect(again).toMatchObject({id:job.id,status:'running',provider:'codex'});expect(service.state().jobs).toHaveLength(1);await expect.poll(()=>!!release).toBe(true);service.stop(job.id);release(await answer({kind:'author'} as AgentRequest));await expect.poll(()=>service.state().jobs[0].status).toBe('stopped');expect(store.list()).toEqual([])});
 it('does not publish rejected content and lets the learner stop revision',async()=>{
  let authors=0;const runner=async(r:AgentRequest,signal:AbortSignal)=>{if(r.kind==='review')return{approved:false,issues:['Unsupported interpretation of the units.']};if(r.kind==='author'&&++authors>1)await new Promise((_,reject)=>{if(signal.aborted)reject(signal.reason);else signal.addEventListener('abort',()=>reject(signal.reason),{once:true})});return answer(r)};
  const {service,store}=await setup(runner);const started=service.start('source','codex');await expect.poll(()=>service.state().jobs[0].stage).toContain('Unsupported interpretation of the units.');expect(store.list()).toEqual([]);service.stop(started.id);expect((await finished(service)).status).toBe('stopped');expect(store.list()).toEqual([]);
@@ -238,4 +239,99 @@ it('regenerates a previously approved section when its source changes',async()=>
  const bundle=store.getBundle('source')!;bundle.sources[0].markdown='# First\n\nA delay of 43 ms.\n\n# Second\n\nA delay of 7 ms.';store.saveBundle(bundle,[]);
  const restarted=new PreparationService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
  expect(authored.filter(call=>call.startsWith('2:')).sort()).toEqual(['2:s00','2:s01']);
+});
+
+// ---- Lesson queue: several library items, each with one section.
+const slugOf=(r:AgentRequest)=>r.cwd.split('/preparation')[0].split('/').pop()!;
+type Gate={run:(r:AgentRequest,s:AbortSignal,onSession?:(pid:number|null)=>void)=>Promise<unknown>;started:string[];release:(slug:string)=>void;held:(slug:string)=>boolean;fail:Set<string>};
+function gate():Gate{
+ const waiting=new Map<string,()=>void>();const released=new Set<string>();const started:string[]=[];const fail=new Set<string>();
+ const run=async(r:AgentRequest,signal:AbortSignal,onSession?:(pid:number|null)=>void)=>{
+  const slug=slugOf(r);if(!started.includes(slug))started.push(slug);
+  if(fail.has(slug))throw new Error('Agent failed for '+slug);
+  onSession?.(1000+started.indexOf(slug));
+  try{if(!released.has(slug))await new Promise<void>((resolve,reject)=>{waiting.set(slug,resolve);if(signal.aborted)reject(signal.reason);else signal.addEventListener('abort',()=>reject(signal.reason),{once:true})})}
+  finally{onSession?.(null)}
+  return answer(r);
+ };
+ return {run,started,fail,held:slug=>waiting.has(slug)&&!released.has(slug),release:slug=>{released.add(slug);waiting.get(slug)?.()}};
+}
+async function setupMany(titles:string[],atOnce:number,run:Gate['run']){
+ const dir=await mkdtemp(join(tmpdir(),'narad-queue-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);
+ for(const title of titles)store.saveBundle({id:title.toLowerCase(),title,text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title,kind:'article',markdown:'# Time\n\nA delay of 42 ms.',assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);
+ const settings=store.getSettings();(settings.preparation as Record<string,unknown>).lessonsAtOnce=atOnce;store.saveSettings(settings);
+ const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);
+ const progress=(slug:string)=>JSON.parse(readFileSync(join(store.libraryRoot,slug,'preparation','progress.json'),'utf8'));
+ const job=(slug:string)=>service.state().jobs.find(j=>j.slug===slug);
+ return {dir,store,service,progress,job};
+}
+it('queues a second lesson when one is running and starts it automatically, first in first out',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
+ expect(t.service.start('time','codex').status).toBe('running');
+ const space=t.service.start('space','codex');expect(space).toMatchObject({status:'queued',queuePosition:1,queueLength:1,stage:'Queued · position 1 of 1'});
+ const light=t.service.start('light','claude','advanced');expect(light).toMatchObject({status:'queued',queuePosition:2,queueLength:2});
+ await expect.poll(()=>existsSync(join(t.store.libraryRoot,'light','preparation','progress.json'))).toBe(true);
+ expect(t.progress('light')).toMatchObject({status:'queued',provider:'claude',request:{familiarity:'advanced',action:'continue'}});expect(t.progress('light').queuedAt).toBeTruthy();
+ expect(t.service.start('space','claude')).toMatchObject({status:'queued',queuePosition:1,provider:'codex'});
+ await expect.poll(()=>g.held('time')).toBe(true);expect(g.started).toEqual(['time']);
+ g.release('time');await expect.poll(()=>t.job('time')?.status).toBe('completed');
+ await expect.poll(()=>g.held('space')).toBe(true);expect(t.job('space')?.status).toBe('running');expect(t.job('light')).toMatchObject({status:'queued',queuePosition:1,queueLength:1});
+ g.release('space');await expect.poll(()=>g.held('light')).toBe(true);g.release('light');
+ await expect.poll(()=>t.job('light')?.status).toBe('completed');expect(t.job('space')?.status).toBe('completed');
+ expect(g.started).toEqual(['time','space','light']);expect(t.store.get('light')!.familiarity).toBe('advanced');
+});
+it('runs two lessons at once in their own folders when lessonsAtOnce is 2',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],2,g.run);
+ t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('running');
+ await expect.poll(()=>g.held('time')&&g.held('space')).toBe(true);
+ expect(t.service.state().sessions.map(s=>s.slug).sort()).toEqual(['space','time']);
+ expect(t.service.busy('time')&&t.service.busy('space')).toBe(true);
+ g.release('space');await expect.poll(()=>t.job('space')?.status).toBe('completed');expect(t.job('time')?.status).toBe('running');
+ expect(t.service.state().sessions.map(s=>s.slug)).toEqual(['time']);
+ g.release('time');await expect.poll(()=>t.job('time')?.status).toBe('completed');
+ for(const slug of ['time','space']){const calls=t.progress(slug).calls;expect(calls.map((c:{n:number})=>c.n)).toEqual(calls.map((_:unknown,i:number)=>i+1));expect(readdirSync(join(t.store.libraryRoot,slug,'preparation','calls')).some(f=>f.startsWith('001-author'))).toBe(true)}
+ expect(t.store.list().map(l=>l.id).sort()).toEqual(['space','time']);
+});
+it('removes a stopped queued item from the queue and never runs it',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
+ t.service.start('time','codex');t.service.start('space','codex');
+ const stopped=await t.service.stop('space');expect(stopped.status).toBe('stopped');expect(t.progress('space').status).toBe('stopped');
+ expect(t.service.start('time','codex').status).toBe('running');
+ await expect.poll(()=>g.held('time')).toBe(true);g.release('time');await expect.poll(()=>t.job('time')?.status).toBe('completed');
+ await new Promise(r=>setTimeout(r,50));expect(g.started).toEqual(['time']);expect(t.job('space')?.status).toBe('stopped');
+});
+it('turns a queued item persisted before a restart into interrupted without calling an agent',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
+ t.service.start('time','codex');t.service.start('space','claude');
+ await expect.poll(()=>existsSync(join(t.store.libraryRoot,'space','preparation','progress.json'))).toBe(true);
+ const calls:AgentRequest[]=[];const restarted=new PreparationService(t.store,t.dir,{run:async r=>{calls.push(r);return answer(r)},available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
+ const job=restarted.state().jobs.find(j=>j.slug==='space')!;
+ expect(job.status).toBe('interrupted');expect(job.stage).toBe('Not started — the server restarted while it was queued');
+ expect(t.progress('space').status).toBe('interrupted');await new Promise(r=>setTimeout(r,50));expect(calls).toEqual([]);
+});
+it('starts the next queued item when the active run fails',async()=>{
+ const g=gate();g.fail.add('time');g.release('space');const t=await setupMany(['Time','Space'],1,g.run);
+ t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');
+ await expect.poll(()=>t.job('space')?.status,{timeout:3000}).toBe('completed');expect(t.job('time')?.status).toBe('failed');
+});
+it('starts queued items as soon as lessonsAtOnce is raised',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
+ t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');
+ const settings=t.store.getSettings();(settings.preparation as Record<string,unknown>).lessonsAtOnce=2;t.store.saveSettings(settings);t.service.settingsChanged();
+ await expect.poll(()=>g.held('space')).toBe(true);expect(t.job('time')?.status).toBe('running');
+ g.release('time');g.release('space');await expect.poll(()=>t.job('space')?.status).toBe('completed');
+});
+it('removes a queued item from the queue before it is deleted or renamed',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
+ t.service.start('time','codex');t.service.start('space','codex');
+ expect(await t.service.dequeue('space')).toBe(true);expect(await t.service.dequeue('space')).toBe(false);expect(t.job('space')?.status).toBe('stopped');
+ g.release('time');await expect.poll(()=>t.job('time')?.status).toBe('completed');await new Promise(r=>setTimeout(r,50));expect(g.started).toEqual(['time']);
+});
+it('stops every active run on shutdown and waits for them',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],2,g.run);
+ t.service.start('time','codex');t.service.start('space','codex');t.service.start('light','codex');
+ await expect.poll(()=>g.held('time')&&g.held('space')).toBe(true);
+ await t.service.shutdown();
+ expect(t.progress('time').status).toBe('interrupted');expect(t.progress('space').status).toBe('interrupted');
+ expect([...g.started].sort()).toEqual(['space','time']);expect(t.service.state().sessions).toEqual([]);
 });
