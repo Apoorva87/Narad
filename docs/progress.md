@@ -68,7 +68,7 @@ The user authorized the next checkpoint after reviewing Jalapeño's actual learn
 - Added structured noninteractive Codex and Claude adapters with restricted tools, retained prompts/logs/outputs, bounded calls, and a separate content-review pass with one correction attempt.
 - The Express process owns one job at a time. SQLite persists job state; an IPC-bound child helper owns the CLI process group. The web UI displays actual live child count, progress, and stop/retry. Existing lessons remain immutable.
 - Topic-only inputs discover up to four sources, then use the existing safe capture path. Capture failures remain visible and block publication.
-- Repository-local `.agents/skills/narad-prepare/SKILL.md` and `scripts/narad.ts` use the same API as the web UI. No global skill/config changes were made.
+- The narad-prepare skill now has Codex and Claude Code versions in `skills/narad-prepare/`, installed by `scripts/install-skills.sh` into each tool's user skills folder; `scripts/narad.ts` supports learner level, continue/start over, per-section status and reader links.
 - Independent review found SIGTERM-resistant child leakage, stale capture UI after failed discovery, permissive summary validation, and overly broad local origins. Reproduced each with regression tests, fixed each, and the reviewer confirmed closure.
 - Additional image-only regression ensures dialogue includes an expert response. Live Claude testing caught schema-dialect rejection; requests now use Draft 7 rather than Zod's default 2020-12.
 - Real Codex run completed the captured MDN latency article, reviewed three sections, published all three modes, and returned session count to zero. The lesson and logs remain local for inspection.

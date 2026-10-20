@@ -280,7 +280,7 @@ The ignored local folder `data/jalapeno-authoring/` holds the source-unit invent
 
     node --import tsx scripts/publish-prepared-lesson.ts data/jalapeno-authoring/manifest.json
 
-Add `--publish` to save a new lesson after reviewing its content and coverage. Existing IDs are rejected. `NARAD_API_URL` overrides the default local API. Authoring files must already contain reviewed teaching content; the script does not launch a model or generate prose.
+Add `--publish` to save a new lesson after reviewing its content and coverage. Existing IDs are rejected. `NARAD_API_URL` overrides the default local API (`http://127.0.0.1:4318`); `NARAD_WEB_URL` overrides the reader address it prints. Authoring files must already contain reviewed teaching content; the script does not launch a model or generate prose.
 
 ## Prepare a lesson with an agent
 
@@ -294,12 +294,23 @@ Progress lives in the item's `preparation/` folder (see above): each approved se
 
 Preparing a new version archives the earlier `lesson.json` under `preparation/runs/` and publishes the new one in place.
 
-The repository skill is [.agents/skills/narad-prepare/SKILL.md](.agents/skills/narad-prepare/SKILL.md). Its CLI uses the same routes as the UI:
+### Agent skill for Codex and Claude Code
 
-    node --import tsx scripts/narad.ts add input.json
-    node --import tsx scripts/narad.ts prepare <bundle-id> codex
-    node --import tsx scripts/narad.ts status
-    node --import tsx scripts/narad.ts stop <job-id>
+`skills/narad-prepare/` holds a **narad-prepare** skill in two versions: `codex/SKILL.md` for Codex and `claude/SKILL.md` for Claude Code. Each lets the agent create, continue, check and stop lessons for you ("make a Narad lesson from <link> at an advanced level"). Install both once:
+
+    scripts/install-skills.sh             # both tools
+    scripts/install-skills.sh --codex     # or just one: --codex / --claude
+    scripts/install-skills.sh --uninstall
+
+They go to `${CODEX_HOME:-~/.codex}/skills/narad-prepare/` and `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/narad-prepare/`, with this checkout's path filled in so they work from any folder. Re-run the script if you move the repository, and restart open Codex/Claude sessions afterwards.
+
+The skills use the command-line helper, which you can also run yourself (add `--json` for raw API output):
+
+    node --import tsx scripts/narad.ts add input.json --level advanced    # prints the item slug
+    node --import tsx scripts/narad.ts prepare <slug> claude              # continues by default; --restart starts over
+    node --import tsx scripts/narad.ts status [<slug>]                    # per-section progress, tokens, folder
+    node --import tsx scripts/narad.ts stop <slug>
+    node --import tsx scripts/narad.ts link <slug>                        # reader address
 
 `input.json` uses the source input shape `{ "title": "...", "text": "ideas or links", "images": [] }`. `NARAD_API_URL` overrides the default local API. The server accepts its own HTTP origin and the default local Vite origin on port 5178; set `NARAD_WEB_ORIGIN` to one exact HTTPS reverse-proxy origin, or to a loopback HTTP origin when changing development ports.
 
