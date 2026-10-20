@@ -14,10 +14,11 @@ import samples from '../content/samples.json';
 const dataDir = resolve(process.env.NARAD_DATA_DIR || 'data');
 mkdirSync(dataDir, { recursive: true });
 const store = new LessonStore(resolve(dataDir, 'narad.sqlite'), resolve(dataDir, 'library'));
-const tutorStore = new TutorStore(resolve(dataDir, 'tutor.sqlite'));
+const tutorDbPath = resolve(dataDir, 'tutor.sqlite');
+const tutorStore = new TutorStore(tutorDbPath);
 // One-time move of content from the old SQLite tables into library folders; retried on each start until every item succeeds.
 try {
-  const migration = migrateToLibrary({ dbPath: resolve(dataDir, 'narad.sqlite'), dataDir, store, tutors: tutorStore });
+  const migration = migrateToLibrary({ dbPath: resolve(dataDir, 'narad.sqlite'), dataDir, store, tutors: tutorStore, tutorDbPath });
   const salvaged = Object.values(migration.salvaged).reduce((sum, n) => sum + n, 0);
   if (migration.migrated || salvaged) console.log(`Narad library: moved ${migration.migrated} item(s) into folders, salvaged ${salvaged} finished section(s).`);
   for (const line of migration.skipped) console.warn('Narad library migration:', line);

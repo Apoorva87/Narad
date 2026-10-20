@@ -6,13 +6,15 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { LessonStore } from '../server/store';
+import { LibraryFs } from '../server/library';
+import { TutorStore } from '../server/tutor-store';
 import { PreparationService } from '../server/preparation';
 import { migrateToLibrary } from '../server/migrate';
 import type { AgentRequest } from '../server/agent-runner';
 import { minimalLesson } from './fixture';
 
 const dirs: string[] = []; const stores: LessonStore[] = [];
-afterEach(() => { for (const store of stores.splice(0)) store.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); for (const store of stores.splice(0)) store.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 // The schema of the SQLite store before library folders (commit 440ced5).
 const legacySchema = `
@@ -75,10 +77,15 @@ const legacyCounts = (dbPath: string) => {
 
 it('migrates bundles, lessons, images, positions and preparation folders, then removes the legacy rows', async () => {
   const { dir, dbPath, store, png } = await fixture();
-  const tutors = { moveLesson: vi.fn() };
-  const result = migrateToLibrary({ dbPath, dataDir: dir, store, tutors });
+  const tutorDbPath = join(dir, 'tutor.sqlite');
+  const tutorStore = new TutorStore(tutorDbPath);
+  tutorStore.save({ id: 'turn-1', lessonId: 'lesson-old-1', mode: 'walkthrough', blockId: 'block-b', status: 'answered' } as any);
+  const tutors = { moveLesson: vi.fn((from: string, to: string) => tutorStore.moveLesson(from, to)) };
+  const result = migrateToLibrary({ dbPath, dataDir: dir, store, tutors, tutorDbPath });
   expect(result.skipped.filter(s => !s.includes('job-orphan'))).toEqual([]);
   expect(result.migrated).toBe(3);
+  expect(tutorStore.list('attention-paper')).toHaveLength(1);
+  tutorStore.close();
 
   const slug = store.resolveId('lesson-old-1')!;
   expect(slug).toBe('attention-paper');
@@ -112,9 +119,13 @@ it('migrates bundles, lessons, images, positions and preparation folders, then r
   expect(existsSync(join(folder, 'preparation', 'progress.json'))).toBe(false);
 
   expect(legacyCounts(dbPath)).toEqual({ lessons: 0, progress: 0, source_bundles: 0, source_assets: 0 });
-  const backups = readdirSync(join(dir, 'backups'));
-  expect(backups).toHaveLength(1); expect(backups[0]).toMatch(/^narad-.+\.sqlite$/);
+  const backups = readdirSync(join(dir, 'backups')).sort();
+  expect(backups).toHaveLength(2); expect(backups[0]).toMatch(/^narad-.+\.sqlite$/); expect(backups[1]).toMatch(/^tutor-.+\.sqlite$/);
   expect(legacyCounts(join(dir, 'backups', backups[0]))).toEqual({ lessons: 2, progress: 1, source_bundles: 2, source_assets: 1 });
+  // The tutor backup was taken before threads moved to the new folder name.
+  const tutorBackup = new DatabaseSync(join(dir, 'backups', backups[1]));
+  expect(tutorBackup.prepare('SELECT lesson_id FROM tutor_turns').all()).toEqual([{ lesson_id: 'lesson-old-1' }]);
+  tutorBackup.close();
 });
 
 it('salvages only approved sections whose source still matches and Continue resumes from them', async () => {
@@ -161,16 +172,26 @@ it('changes nothing when run a second time', async () => {
 });
 const safeRead = (path: string) => { try { return createHash('sha256').update(readFileSync(path)).digest('hex'); } catch { return 'dir'; } };
 
+/** Makes the library writer throw for one item's files, as a crash part-way through writing that item would. */
+const failWrites = (slug: string, file: RegExp) => {
+  const original = LibraryFs.prototype.writeBytes;
+  return vi.spyOn(LibraryFs.prototype, 'writeBytes').mockImplementation(function (this: LibraryFs, s: string, f: string, bytes: Uint8Array) {
+    if (s === slug && file.test(f)) throw new Error('disk full');
+    return original.call(this, s, f, bytes);
+  });
+};
+const folders = (store: LessonStore) => readdirSync(store.libraryRoot);
+
 it('keeps every legacy row when any item fails, reports it, and finishes on the next start', async () => {
   const { dir, dbPath, store } = await fixture();
-  const save = store.saveBundle.bind(store);
-  const spy = vi.spyOn(store, 'saveBundle').mockImplementation((bundle, blobs) => { if (bundle.id === SECOND) throw new Error('disk full'); return save(bundle, blobs); });
+  const spy = failWrites('second-topic', /^sources\//);
   const result = migrateToLibrary({ dbPath, dataDir: dir, store });
   expect(result.skipped.some(s => s.includes(SECOND) && s.includes('disk full'))).toBe(true);
   expect(legacyCounts(dbPath)).toEqual({ lessons: 2, progress: 1, source_bundles: 2, source_assets: 1 });
   // Folders that did migrate are served meanwhile, and their preparation folders already moved.
   expect(store.get('lesson-old-1')?.title).toBe('Attention lesson');
   expect(existsSync(join(dir, 'preparations', 'job-b'))).toBe(true);
+  expect(folders(store).sort()).toEqual(['attention-paper', 'solo-notes']);
 
   spy.mockRestore();
   const retry = migrateToLibrary({ dbPath, dataDir: dir, store });
@@ -179,6 +200,79 @@ it('keeps every legacy row when any item fails, reports it, and finishes on the 
   expect(retry.salvaged).toEqual({ 'second-topic': 2 });
   expect(legacyCounts(dbPath)).toEqual({ lessons: 0, progress: 0, source_bundles: 0, source_assets: 0 });
   expect(store.list().filter(item => item.id === 'attention-paper')).toHaveLength(1);
+});
+
+it.each([
+  ['a collection before its item.json', 'attention-paper', /^media\//],
+  ['a collection after its item.json', 'second-topic', /^sources\//],
+  ['a standalone lesson after its item.json', 'solo-notes', /^lesson\.json$/],
+])('a crash while writing %s leaves exactly one folder per item after the retry', async (_label, slug, file) => {
+  const { dir, dbPath, store } = await fixture();
+  failWrites(slug, file);
+  const first = migrateToLibrary({ dbPath, dataDir: dir, store });
+  expect(first.skipped.some(s => s.includes('disk full'))).toBe(true);
+  expect(folders(store)).not.toContain(slug);
+  expect(legacyCounts(dbPath).lessons).toBe(2);
+  vi.restoreAllMocks();
+  const retry = migrateToLibrary({ dbPath, dataDir: dir, store });
+  expect(retry.skipped.filter(s => !s.includes('job-orphan'))).toEqual([]);
+  expect(folders(store).sort()).toEqual(['attention-paper', 'second-topic', 'solo-notes']);
+  expect(store.get('lesson-old-1')!.id).toBe('attention-paper');
+  expect(store.get('lesson-solo')!.id).toBe('solo-notes');
+  expect(store.getBundle(SECOND)!.id).toBe('second-topic');
+  expect(legacyCounts(dbPath)).toEqual({ lessons: 0, progress: 0, source_bundles: 0, source_assets: 0 });
+});
+
+it('a crash after an item is placed but before it is recorded finishes without a duplicate', async () => {
+  const { dir, dbPath, store } = await fixture();
+  const first = migrateToLibrary({ dbPath, dataDir: dir, store, tutors: { moveLesson: (from) => { if (from === 'lesson-solo') throw new Error('stopped'); } } });
+  expect(first.skipped.some(s => s.includes('lesson-solo') && s.includes('stopped'))).toBe(true);
+  expect(legacyCounts(dbPath).lessons).toBe(2);
+  const moved: string[] = [];
+  const retry = migrateToLibrary({ dbPath, dataDir: dir, store, tutors: { moveLesson: (from, to) => { moved.push(`${from}->${to}`); } } });
+  expect(retry.skipped.filter(s => !s.includes('job-orphan'))).toEqual([]);
+  expect(retry.migrated).toBe(0);
+  expect(moved).toEqual(['lesson-solo->solo-notes']);
+  expect(folders(store).sort()).toEqual(['attention-paper', 'second-topic', 'solo-notes']);
+  expect(legacyCounts(dbPath).lessons).toBe(0);
+});
+
+it('removes staging folders left by a crash before migrating', async () => {
+  const { dir, dbPath, store } = await fixture();
+  mkdirSync(join(store.libraryRoot, '_migrating-leftover', 'attention-paper', 'media'), { recursive: true });
+  writeFileSync(join(store.libraryRoot, '_migrating-leftover', 'attention-paper', 'item.json'), '{"title":"Half"}');
+  migrateToLibrary({ dbPath, dataDir: dir, store });
+  expect(folders(store).sort()).toEqual(['attention-paper', 'second-topic', 'solo-notes']);
+});
+
+it('never re-checks or brings back an item already migrated, even after the user edits or deletes it', async () => {
+  const { dir, dbPath, store } = await fixture();
+  const spy = failWrites('second-topic', /^sources\//);
+  migrateToLibrary({ dbPath, dataDir: dir, store });
+  spy.mockRestore();
+  const sources = join(store.libraryRoot, 'attention-paper', 'sources');
+  const markdown = join(sources, readdirSync(sources).find(f => f.endsWith('.md') && f !== 'notes.md')!);
+  writeFileSync(markdown, readFileSync(markdown, 'utf8') + '\n\nMy own note.');
+  rmSync(join(store.libraryRoot, 'solo-notes'), { recursive: true });
+  const retry = migrateToLibrary({ dbPath, dataDir: dir, store });
+  expect(retry.skipped.filter(s => !s.includes('job-orphan'))).toEqual([]);
+  expect(readFileSync(markdown, 'utf8')).toContain('My own note.');
+  expect(folders(store).sort()).toEqual(['attention-paper', 'second-topic']);
+  expect(store.get('lesson-solo')).toBeUndefined();
+  expect(legacyCounts(dbPath)).toEqual({ lessons: 0, progress: 0, source_bundles: 0, source_assets: 0 });
+});
+
+it('reports a corrupt legacy row, migrates the rest, and keeps every row', async () => {
+  const { dir, dbPath, store } = await fixture();
+  const db = new DatabaseSync(dbPath);
+  db.prepare('INSERT INTO source_bundles (id, document, saved_at) VALUES (?, ?, ?)').run('bad-bundle', '{not json', 9);
+  db.prepare('INSERT INTO preparation_jobs (id, document, saved_at) VALUES (?, ?, ?)').run('bad-job', 'nope', 9);
+  db.close();
+  const result = migrateToLibrary({ dbPath, dataDir: dir, store });
+  expect(result.skipped.some(s => s.includes('bad-bundle'))).toBe(true);
+  expect(result.skipped.some(s => s.includes('bad-job'))).toBe(true);
+  expect(folders(store).sort()).toEqual(['attention-paper', 'second-topic', 'solo-notes']);
+  expect(legacyCounts(dbPath)).toEqual({ lessons: 2, progress: 1, source_bundles: 3, source_assets: 1 });
 });
 
 it('does nothing, and makes no backup, when there is no legacy data', () => {

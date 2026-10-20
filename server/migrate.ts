@@ -6,14 +6,18 @@ import { providers, type Provider } from '../shared/preparation';
 import { legacyWarning, type AssetBlob, type CaptureWarning, type SourceAsset, type SourceBundle } from '../shared/sources';
 import { buildTeachingPlan, checkTeaching, sectionHash, type ChunkLimits, type TeachingTask } from './generation-content';
 import { authoredSectionSchema } from './lesson-preparation';
+import { slugify } from './library';
 import type { Progress } from './preparation';
-import type { LessonStore } from './store';
+import { LessonStore } from './store';
 
 export type MigrationResult = { migrated: number; salvaged: Record<string, number>; skipped: string[] };
 type LegacyJob = { id: string; bundleId?: string; lessonId?: string; provider?: string; createdAt?: string };
 type LegacyBundle = Omit<SourceBundle, 'sources'> & { sources: (Omit<SourceBundle['sources'][number], 'warnings'> & { warnings: (string | CaptureWarning)[] })[] };
+/** One folder to write: a collection with its newest lesson, a collection alone, or a lesson alone. */
+type Group = { bundle?: LegacyBundle; bundleDoc?: string; lesson?: Lesson };
 
 const LEGACY_TABLES = ['progress', 'lessons', 'source_bundles', 'source_assets'];
+const STAGING = '_migrating-';
 const HASH_SRC = /^\/api\/source-assets\/([a-f0-9]{64})$/;
 const SERVED_MEDIA = /^\/api\/library\/([a-z0-9][a-z0-9-]*)\/media\/([^/]+)$/;
 const INTERRUPTED = 'Preparation was interrupted before Narad moved to library folders. Finished sections are saved; press Continue to resume.';
@@ -21,23 +25,34 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 const readJson = <T>(path: string): T | undefined => { try { return JSON.parse(readFileSync(path, 'utf8')) as T; } catch { return undefined; } };
 
 /**
- * Moves content from the pre-folder SQLite tables into library folders, once. Backs up the database first, writes every item,
- * re-reads and checks each one, and deletes the legacy rows only when all of them succeeded; otherwise the rows stay and the next
- * start retries. Items already migrated (their old ID is in a folder's `legacyIds`) are left alone. Old preparation folders move
- * into their item's `preparation/runs/legacy-<jobId>/`, and approved sections from an interrupted run are salvaged so Continue resumes them.
+ * Moves content from the pre-folder SQLite tables into library folders, once.
+ * - Backs up narad.sqlite (and the tutor database, when given) before any write.
+ * - Builds each item in a staging folder the library ignores (`_migrating-…`), checks it there, then renames it into place, so a
+ *   crash never leaves a half-written item; leftover staging folders are removed on the next start.
+ * - Records every placed item in `migration_done`; recorded items are never checked or written again, so later edits and deletions stand.
+ * - Deletes the legacy rows only when every row migrated; otherwise all rows stay and the next start retries the rest.
+ * Old preparation folders move into their item's `preparation/runs/legacy-<jobId>/`, and approved sections from an interrupted run
+ * are salvaged so Continue resumes them.
  */
-export function migrateToLibrary(options: { dbPath: string; dataDir: string; store: LessonStore; tutors?: { moveLesson(from: string, to: string): void } }): MigrationResult {
-  const { dbPath, dataDir, store, tutors } = options;
+export function migrateToLibrary(options: { dbPath: string; dataDir: string; store: LessonStore; tutors?: { moveLesson(from: string, to: string): void }; tutorDbPath?: string }): MigrationResult {
+  const { dbPath, dataDir, store, tutors, tutorDbPath } = options;
   const result: MigrationResult = { migrated: 0, salvaged: {}, skipped: [] };
+  if (existsSync(store.libraryRoot))
+    for (const entry of readdirSync(store.libraryRoot)) if (entry.startsWith(STAGING)) rmSync(join(store.libraryRoot, entry), { recursive: true, force: true });
   const db = new DatabaseSync(dbPath);
   try {
     db.exec('PRAGMA busy_timeout=5000;');
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name as string));
     const all = (table: string, order: string) => tables.has(table) ? db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all() : [];
-    const bundles = all('source_bundles', 'saved_at, rowid');
+    const bundleRows = all('source_bundles', 'saved_at, rowid');
     // Newest first, so when two old lessons share a collection the newest is the one kept beside its sources.
-    const lessons = all('lessons', 'saved_at DESC, rowid DESC');
-    const jobs = new Map(all('preparation_jobs', 'saved_at, rowid').map(row => [row.id as string, JSON.parse(row.document as string) as LegacyJob]));
+    const lessonRows = all('lessons', 'saved_at DESC, rowid DESC');
+    let failed = false;
+    const fail = (label: string, error: unknown) => { failed = true; result.skipped.push(`${label}: ${message(error)}`); };
+    const parse = <T>(table: string, row: Record<string, unknown>): T | undefined => {
+      try { return JSON.parse(row.document as string) as T; } catch (error) { fail(`${table} ${String(row.id)}: unreadable row`, error); return undefined; }
+    };
+    const jobs = new Map<string, LegacyJob>();
     const prepRoot = join(dataDir, 'preparations');
     const prepDirs = existsSync(prepRoot) ? readdirSync(prepRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name).sort() : [];
     const targetFor = (jobId: string) => {
@@ -46,80 +61,67 @@ export function migrateToLibrary(options: { dbPath: string; dataDir: string; sto
       for (const id of [job?.lessonId, job?.bundleId, snapshotId]) { const slug = id ? store.resolveId(id) : undefined; if (slug) return slug; }
       return undefined;
     };
-    if (!bundles.length && !lessons.length && !prepDirs.some(targetFor)) return result;
+    if (!bundleRows.length && !lessonRows.length && !prepDirs.some(targetFor)) return result;
 
-    try { backup(db, dataDir); }
+    try { backup(db, dataDir, 'narad'); if (tutorDbPath && existsSync(tutorDbPath)) backupFile(tutorDbPath, dataDir, 'tutor'); }
     catch (error) { result.skipped.push('Backup failed, nothing was migrated: ' + message(error)); return result; }
 
+    for (const row of all('preparation_jobs', 'saved_at, rowid')) { const job = parse<LegacyJob>('preparation_jobs', row); if (job) jobs.set(row.id as string, job); }
+    db.exec('CREATE TABLE IF NOT EXISTS migration_done (old_id TEXT PRIMARY KEY, slug TEXT NOT NULL, done_at INTEGER NOT NULL)');
+    const done = new Map(db.prepare('SELECT old_id, slug FROM migration_done').all().map(row => [row.old_id as string, row.slug as string]));
+    const record = db.prepare('INSERT OR REPLACE INTO migration_done (old_id, slug, done_at) VALUES (?, ?, ?)');
     const blob = (hash: string): AssetBlob => {
       const row = db.prepare('SELECT bytes, type FROM source_assets WHERE id = ?').get(hash) as { bytes: Uint8Array; type: string } | undefined;
       if (!row) throw new Error('Saved image is missing: ' + hash);
       return { id: hash, bytes: Buffer.from(row.bytes), type: row.type };
     };
+
+    // Plan one folder per collection (with its newest lesson) and per remaining lesson; recorded items are skipped.
+    const groups: Group[] = [];
+    const byBundle = new Map<string, Group>();
+    const unreadable = new Set<string>();
+    for (const row of bundleRows) {
+      const bundle = parse<LegacyBundle>('source_bundles', row);
+      if (!bundle) { unreadable.add(row.id as string); continue; }
+      if (done.has(bundle.id)) continue;
+      const group: Group = { bundle, bundleDoc: row.document as string };
+      groups.push(group); byBundle.set(bundle.id, group);
+    }
+    for (const row of lessonRows) {
+      const lesson = parse<Lesson>('lessons', row);
+      if (!lesson || done.has(lesson.id)) continue;
+      if (lesson.sourceBundleId && unreadable.has(lesson.sourceBundleId)) { fail(`${lesson.id} (${lesson.title})`, 'its source collection row is unreadable'); continue; }
+      const home = lesson.sourceBundleId ? byBundle.get(lesson.sourceBundleId) : undefined;
+      if (home && !home.lesson) home.lesson = lesson; else groups.push({ lesson });
+    }
+
     const written = new Set<string>();
-    let failed = false;
-    const fail = (label: string, error: unknown) => { failed = true; result.skipped.push(`${label}: ${message(error)}`); };
-
-    // 1. Source collections, with their images written into media/.
-    const bundleSlugs = new Map<string, string>();
-    const servedByHash = new Map<string, Map<string, string>>();
-    for (const row of bundles) {
-      const old = JSON.parse(row.document as string) as LegacyBundle;
+    for (const group of groups) {
+      const ids = [group.bundle?.id, group.lesson?.id].filter((id): id is string => !!id);
+      const label = group.bundle ? `${group.bundle.id} (${group.bundle.title})` : `${group.lesson!.id} (${group.lesson!.title})`;
       try {
-        const existing = store.resolveId(old.id);
-        let saved = existing ? store.getBundle(existing) : undefined;
-        if (!saved) {
-          const hashes = [...new Set([...(row.document as string).matchAll(/\/api\/source-assets\/([a-f0-9]{64})/g)].map(match => match[1]))];
-          saved = store.saveBundle(normaliseBundle(old), hashes.map(blob));
-          written.add(saved.id);
-        }
-        servedByHash.set(saved.id, verifyBundle(store, old, saved));
-        bundleSlugs.set(old.id, saved.id);
-      } catch (error) { fail(`${old.id} (${old.title})`, error); }
+        // Placed by an earlier start that stopped before recording it: check it and record it.
+        const found = ids.map(id => store.resolveId(id)).find(Boolean);
+        const slug = found ?? stage(store, group, blob);
+        if (found) {
+          if (group.bundle) verifyBundle(store, group.bundle, found);
+          if (group.lesson) { if (store.resolveId(group.lesson.id) !== found) throw new Error('the lesson is missing from its folder'); verifyLesson(store, group.lesson, found); }
+        } else written.add(slug);
+        if (group.lesson && group.lesson.id !== slug) tutors?.moveLesson(group.lesson.id, slug);
+        for (const id of ids) { record.run(id, slug, Date.now()); done.set(id, slug); }
+      } catch (error) { fail(label, error); }
     }
 
-    // 2. Lessons: into their collection's folder, or a folder of their own.
-    const lessonSlugs = new Map<string, string>();
-    for (const row of lessons) {
-      const old = JSON.parse(row.document as string) as Lesson;
-      try {
-        let slug = store.resolveId(old.id);
-        if (!slug || !store.get(slug)) {
-          const known = !!old.sourceBundleId && bundles.some(bundle => bundle.id === old.sourceBundleId);
-          const bundleSlug = old.sourceBundleId ? bundleSlugs.get(old.sourceBundleId) : undefined;
-          if (known && !bundleSlug) throw new Error('its source collection did not migrate');
-          const intoBundle = !!bundleSlug && !existsSync(join(store.library.dir(bundleSlug), 'lesson.json'));
-          const served = intoBundle ? servedByHash.get(bundleSlug!) : undefined;
-          const media: Record<string, Buffer> = {};
-          const assets = old.assets.map((asset, index) => {
-            const hash = asset.src.match(HASH_SRC)?.[1];
-            if (!hash) return asset;
-            const reused = served?.get(hash);
-            if (reused) return { ...asset, src: reused };
-            const { bytes, type } = blob(hash);
-            const file = `lesson-${String(index + 1).padStart(2, '0')}.${extension(type)}`;
-            media[file] = bytes;
-            return { ...asset, src: 'media/' + file };
-          });
-          slug = store.insert({ ...old, assets, sourceBundleId: intoBundle ? old.sourceBundleId : undefined }, { media }).id;
-          written.add(slug);
-        }
-        verifyLesson(store, old, slug);
-        lessonSlugs.set(old.id, slug);
-        if (old.id !== slug) tutors?.moveLesson(old.id, slug);
-      } catch (error) { fail(`${old.id} (${old.title})`, error); }
-    }
-
-    // 3. Reading positions, keyed by folder name now. A position already saved under the new name wins.
+    // Reading positions, keyed by folder name now. A position already saved under the new name wins; deleted items get none.
     if (tables.has('progress') && tables.has('positions')) {
       const insert = db.prepare('INSERT OR IGNORE INTO positions (slug, mode, block_id, updated_at) VALUES (?, ?, ?, ?)');
       for (const row of db.prepare('SELECT lesson_id, mode, block_id, updated_at FROM progress').all()) {
-        const slug = lessonSlugs.get(row.lesson_id as string);
-        if (slug) insert.run(slug, row.mode as string, row.block_id as string, row.updated_at as number);
+        const slug = done.get(row.lesson_id as string);
+        if (slug && store.library.exists(slug)) insert.run(slug, row.mode as string, row.block_id as string, row.updated_at as number);
       }
     }
 
-    // 4. Old preparation folders move into their item; those without one stay put.
+    // Old preparation folders move into their item; those without one stay put.
     for (const jobId of prepDirs) {
       const slug = targetFor(jobId);
       if (!slug) { result.skipped.push(`preparations/${jobId}: no matching library item; left in place`); continue; }
@@ -127,16 +129,17 @@ export function migrateToLibrary(options: { dbPath: string; dataDir: string; sto
       catch (error) { result.skipped.push(`preparations/${jobId}: could not move: ${message(error)}`); }
     }
 
-    // 5. Salvage approved sections for collections without a lesson.
+    // Salvage approved sections for collections without a lesson.
     const { chunkChars, chunkUnits } = store.getSettings().preparation;
-    for (const slug of new Set(bundleSlugs.values())) {
+    const bundleSlugs = new Set(bundleRows.map(row => done.get(row.id as string)).filter((slug): slug is string => !!slug && store.library.exists(slug)));
+    for (const slug of bundleSlugs) {
       try {
         const count = salvage(store, slug, { chunkChars, chunkUnits }, jobs);
         if (count) result.salvaged[slug] = count;
       } catch (error) { result.skipped.push(`${slug}: could not salvage sections: ${message(error)}`); }
     }
 
-    // 6. Every item was written and read back: only now remove the legacy rows.
+    // Every row migrated: only now remove the legacy rows.
     if (!failed) {
       db.exec('BEGIN');
       try { for (const table of LEGACY_TABLES) if (tables.has(table)) db.exec(`DELETE FROM ${table}`); db.exec('COMMIT'); }
@@ -148,15 +151,62 @@ export function migrateToLibrary(options: { dbPath: string; dataDir: string; sto
   } finally { db.close(); }
 }
 
-/** Copies the database, including anything still in its write-ahead log, to `backups/narad-<timestamp>.sqlite`. */
-function backup(db: DatabaseSync, dataDir: string): string {
+/**
+ * Writes one item into `<library>/_migrating-…/<slug>/` with a store of its own, checks it, records its old IDs in `legacyIds`,
+ * then renames it into the library under a free folder name. Returns that name. The staging folder is always removed.
+ */
+function stage(store: LessonStore, group: Group, blob: (hash: string) => AssetBlob): string {
+  const ids = [group.bundle?.id, group.lesson?.id].filter((id): id is string => !!id);
+  const root = join(store.libraryRoot, STAGING + ids[0].toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 80));
+  rmSync(root, { recursive: true, force: true });
+  const staging = new LessonStore(':memory:', root);
+  try {
+    let slug: string | undefined;
+    let served = new Map<string, string>();
+    if (group.bundle) {
+      const hashes = [...new Set([...group.bundleDoc!.matchAll(/\/api\/source-assets\/([a-f0-9]{64})/g)].map(match => match[1]))];
+      slug = staging.saveBundle(normaliseBundle(group.bundle), hashes.map(blob)).id;
+      served = verifyBundle(staging, group.bundle, slug);
+    }
+    if (group.lesson) {
+      const media: Record<string, Buffer> = {};
+      const assets = group.lesson.assets.map((asset, index) => {
+        const hash = asset.src.match(HASH_SRC)?.[1];
+        if (!hash) return asset;
+        const reused = served.get(hash);
+        if (reused) return { ...asset, src: reused };
+        const { bytes, type } = blob(hash);
+        const file = `lesson-${String(index + 1).padStart(2, '0')}.${extension(type)}`;
+        media[file] = bytes;
+        return { ...asset, src: 'media/' + file };
+      });
+      slug = staging.insert({ ...group.lesson, assets, sourceBundleId: group.bundle?.id }, { media }).id;
+      verifyLesson(staging, group.lesson, slug);
+    }
+    const taken = new Set(store.library.slugs());
+    const final = taken.has(slug!) ? slugify(slug!, taken) : slug!;
+    const item = staging.library.readJson<{ legacyIds?: string[] }>(slug!, 'item.json').value!;
+    staging.library.writeJson(slug!, 'item.json', { ...item, legacyIds: [...new Set([...(item.legacyIds ?? []), ...ids])].filter(id => id !== final) });
+    renameSync(staging.library.dir(slug!), store.library.dir(final));
+    if (group.bundle && !store.getBundle(final)) throw new Error('the folder could not be read back');
+    if (group.lesson && !store.get(final)) throw new Error('the lesson could not be read back');
+    return final;
+  } finally { staging.close(); rmSync(root, { recursive: true, force: true }); }
+}
+
+/** Copies a database, including anything still in its write-ahead log, to `backups/<name>-<timestamp>.sqlite`. */
+function backup(db: DatabaseSync, dataDir: string, name: string): string {
   const folder = join(dataDir, 'backups');
   mkdirSync(folder, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  let path = join(folder, `narad-${stamp}.sqlite`);
-  for (let n = 2; existsSync(path); n++) path = join(folder, `narad-${stamp}-${n}.sqlite`);
+  let path = join(folder, `${name}-${stamp}.sqlite`);
+  for (let n = 2; existsSync(path); n++) path = join(folder, `${name}-${stamp}-${n}.sqlite`);
   db.exec(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
   return path;
+}
+function backupFile(dbPath: string, dataDir: string, name: string): string {
+  const db = new DatabaseSync(dbPath);
+  try { db.exec('PRAGMA busy_timeout=5000;'); return backup(db, dataDir, name); } finally { db.close(); }
 }
 
 /** Warnings become objects, and each image gets a credit from what the old capture recorded. */
@@ -170,8 +220,8 @@ function normaliseBundle(old: LegacyBundle): SourceBundle {
 }
 
 /** Checks the folder reads back with the same sources and every image saved; returns old image hash → served path. */
-function verifyBundle(store: LessonStore, old: LegacyBundle, saved: SourceBundle): Map<string, string> {
-  const fresh = store.getBundle(saved.id);
+function verifyBundle(store: LessonStore, old: LegacyBundle, slug: string): Map<string, string> {
+  const fresh = store.getBundle(slug);
   if (!fresh) throw new Error('the folder could not be read back');
   if (fresh.sources.length !== old.sources.length || fresh.sources.some((source, i) => source.markdown !== old.sources[i].markdown || source.assets.length !== old.sources[i].assets.length))
     throw new Error('the folder does not match the saved sources');
