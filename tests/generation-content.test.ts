@@ -63,6 +63,13 @@ it('removes generated speaker prefixes from spoken fields without changing their
  expect(normalized.units[1].dialogueSpoken).toBe('Connect to the host: example.com. Ask the expert: on call.');
  expect(normalized.units[0].dialogue).toBe(teaching.units[0].dialogue);
 });
+it('rejects labeled dialogue scripts before they can be saved as a speaker turn',()=>{
+ const task=buildTeachingPlan(bundle)[0];const teaching=draft(task);const unit=teaching.units[0];
+ const labeled={...teaching,units:teaching.units.map(item=>item.id===unit.id?{...item,dialogue:'Host: What does this mean?\n\nExpert: It explains the measurement.'}:item)};
+ expect(checkTeaching(task,labeled)).toContain(`Unit ${unit.id} dialogue must contain only the expert response; put host speech in question and omit speaker labels.`);
+ const visualLabeled={...teaching,visuals:teaching.visuals.map((visual,index)=>index?visual:{...visual,dialogueTurns:[{role:'host' as const,markdown:'Host: Why?',spokenText:'Why?'},{role:'expert' as const,markdown:'Expert: Read the axis.',spokenText:'Read the axis.'}]})};
+ expect(checkTeaching(task,visualLabeled)).toContain(`Visual ${teaching.visuals[0].id} turn 1 must contain only the utterance; role already identifies the speaker, so omit labels.`);
+});
 it('does not accept invented non-URL source labels as discovered research links',async()=>{
  const {researchSchema}=await import('../server/generation-content');expect(researchSchema.safeParse({links:['Some authoritative article'],rationale:'Helpful'}).success).toBe(false);
 });

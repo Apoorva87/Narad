@@ -34,4 +34,12 @@ describe('settings', () => {
     expect(defaultSettings.prompts.visualGuidance).not.toMatch(/2[–-]12|maximum.*turn/i);
     expect(defaultSettings.prompts.visualGuidance).toMatch(/as many.*turns.*needed/i);
   });
+  it('keeps generated dialogue roles structural and separates host questions from expert answers', () => {
+    expect(defaultSettings.prompts.section).toMatch(/hostQuestion and each unit question are only the host/i);
+    expect(defaultSettings.prompts.section).toMatch(/dialogue and dialogueSpoken are only the expert/i);
+    expect(defaultSettings.prompts.dialogueGuidance).toMatch(/never Host:, Expert:/);
+    expect(defaultSettings.prompts.visualGuidance).toMatch(/role identifies the speaker/i);
+    expect(defaultSettings.prompts.revision).toMatch(/remove speaker labels\/transcript formatting/i);
+    expect(defaultSettings.prompts.summary).toMatch(/no Host:\/Expert: labels/i);
+  });
 });

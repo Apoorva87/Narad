@@ -39,6 +39,18 @@ it('provides start, restart, kill, status, and provider-login operations',async(
  expect(script).toContain('login codex|claude');expect(script).toContain('server/tts-host.ts');expect(script).toContain('--env-file');
  expect(script).toContain('login --device-auth');expect(script).toContain('auth login --claudeai');expect(script).not.toContain('setup-token');
  expect(script).toContain("ps -p \"$pid\" -o lstart=");expect(script).toContain("ps -p \"$pid\" -o command=");
+ expect(script).toContain('tts_healthy()');
+ expect(script).toContain('nohup node --import tsx');
+ expect(script).toContain('pgrep -P "$pid"');
+ expect(script).toContain('if tts_running; then');
+ expect(script).toContain('macOS TTS: responding (state:');
+ expect(script).toContain('process running (PID $pid), but health check failed');
+ expect(script).toContain('stop_tts\n  fi');
+ expect(script).toMatch(/start_all\(\)[\s\S]*?ensure_runtime;start_tts/);
+ expect(script).toMatch(/kill_all\(\)[\s\S]*?stop_tts/);
+ expect(script).toContain('start) start_all ;;');
+ expect(script).toContain('restart) kill_all; start_all ;;');
+ expect(script).toContain('kill|stop) kill_all; ensure_runtime; show_status');
  expect(script).toContain('NARAD_UID=');
 });
 

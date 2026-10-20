@@ -16,7 +16,12 @@ function exactBatch<T extends z.ZodRawShape>(taskIds:string[],shape:T) {
 /** One coordinator response, keyed so parallel subagent results cannot be assigned to the wrong source section. */
 export function authorBatchSchema(taskIds:string[]){return exactBatch(taskIds,{teaching:agentSectionSchema})}
 export function reviewBatchSchema(taskIds:string[]){return exactBatch(taskIds,{approved:z.boolean(),issues:z.array(z.string())})}
-export const summarySchema = z.object({ sections: z.array(z.object({ title: z.string().min(1), markdown: z.string().min(1), spokenText: z.string().min(1), sourceIds: z.array(z.string()).min(1) })).min(1) });
+const generatedSpeakerLabel=/(^|[.!?]\s+|\n\s*)(?:\*\*|__)?(?:Host|Expert)(?:(?:\*\*|__)?)\s*:(?:\*\*|__)?/;
+export const summarySchema = z.object({ sections: z.array(z.object({ title: z.string().min(1), markdown: z.string().min(1), spokenText: z.string().min(1), sourceIds: z.array(z.string()).min(1) })).min(1) }).superRefine((summary,ctx)=>{
+  summary.sections.forEach((section,index)=>{
+    for(const field of ['title','markdown','spokenText'] as const)if(generatedSpeakerLabel.test(section[field]))ctx.addIssue({code:'custom',path:['sections',index,field],message:'Summary text must not include Host or Expert speaker labels.'});
+  });
+});
 export type Summary = z.infer<typeof summarySchema>['sections'];
 export const reviewSchema = z.object({ approved: z.boolean(), issues: z.array(z.string()) });
 export const researchSchema = z.object({ links: z.array(z.string().regex(/^https?:\/\/[^\s]+$/)).min(1).max(4), rationale: z.string() });
@@ -55,11 +60,17 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   const parsed=authoredSectionSchema.safeParse(input);
   if (!parsed.success) return ['Invalid teaching structure: '+parsed.error.message.slice(0,1500)];
   const teaching=parsed.data;const issues:string[]=[];
+  const noSpeakerLabel=(field:string,text:string)=>{if(generatedSpeakerLabel.test(text))issues.push(`${field} contains a Host/Expert speaker label; use the structured speaker field and return only the utterance.`)};
   if(teaching.id!==task.section.id) issues.push('Wrong section ID');
+  noSpeakerLabel('Section introduction',teaching.introduction);noSpeakerLabel('Section host question',teaching.hostQuestion);
   const units=task.section.units.filter(u=>u.kind!=='figure' && u.kind!=='note');
   for(const unit of units) {
     const draft=teaching.units.find(u=>u.id===unit.id);
     if(!draft) {issues.push('Missing unit '+unit.id);continue;}
+    noSpeakerLabel(`Unit ${unit.id} walkthrough`,draft.walkthrough);noSpeakerLabel(`Unit ${unit.id} spoken walkthrough`,draft.walkthroughSpoken);
+    if(generatedSpeakerLabel.test(draft.dialogue))issues.push(`Unit ${unit.id} dialogue must contain only the expert response; put host speech in question and omit speaker labels.`);
+    noSpeakerLabel(`Unit ${unit.id} spoken dialogue`,draft.dialogueSpoken);
+    if(draft.question)noSpeakerLabel(`Unit ${unit.id} question`,draft.question);
     for(const mode of ['walkthrough','dialogue'] as const) {
       if(unit.kind==='text') {const written=numericTokens(draft[mode]);const missing=[...numericTokens(unit.markdown)].filter(n=>!written.has(n));if(missing.length) issues.push(`${unit.id} ${mode} missing values: ${missing.join(', ')}`);}
       if(unit.kind==='text' && draft[mode].trim()===unit.markdown.trim()) issues.push(`${unit.id} ${mode} copies the source without explaining it`);
@@ -67,7 +78,13 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   }
   if(teaching.units.length!==units.length || new Set(teaching.units.map(u=>u.id)).size!==units.length) issues.push('Unexpected or duplicate unit IDs');
   for(const asset of task.assets) if(!teaching.visuals.some(v=>v.id===asset.id)) issues.push('Missing visual '+asset.id);
-  for (const visual of teaching.visuals) if (visual.dialogueTurns && (!visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert'))) issues.push('Visual '+visual.id+' needs both host and expert dialogue turns.');
+  for (const visual of teaching.visuals) {
+    noSpeakerLabel(`Visual ${visual.id} caption`,visual.caption);noSpeakerLabel(`Visual ${visual.id} explanation`,visual.explanation);noSpeakerLabel(`Visual ${visual.id} spoken explanation`,visual.spokenText);
+    if (visual.dialogueTurns && (!visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert'))) issues.push('Visual '+visual.id+' needs both host and expert dialogue turns.');
+    visual.dialogueTurns?.forEach((turn,index)=>{
+      if(generatedSpeakerLabel.test(turn.markdown)||generatedSpeakerLabel.test(turn.spokenText))issues.push(`Visual ${visual.id} turn ${index+1} must contain only the utterance; role already identifies the speaker, so omit labels.`);
+    });
+  }
   if(teaching.visuals.some(v=>!task.assets.some(a=>a.id===v.id)) || new Set(teaching.visuals.map(v=>v.id)).size!==teaching.visuals.length) issues.push('Unexpected or duplicate visual IDs');
   return issues;
 }

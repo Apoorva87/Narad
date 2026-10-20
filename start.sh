@@ -71,19 +71,33 @@ tts_running() {
   [[ "$current_start" == "$recorded_start" && "$command" == *"$project_dir/server/tts-host.ts"* ]]
 }
 
+tts_health_response() {
+  curl --max-time 3 -fsS -H "Authorization: Bearer $NARAD_TTS_TOKEN" http://127.0.0.1:4321/health
+}
+
+tts_healthy() {
+  local response
+  response="$(tts_health_response)" || return 1
+  [[ "$response" == *'"state":'* ]]
+}
+
 start_tts() {
-  if tts_running; then return 0; fi
+  if tts_running; then
+    if tts_healthy; then return 0; fi
+    echo "The macOS TTS host process is running but its health check failed; restarting it."
+    stop_tts
+  fi
   rm -f "$tts_pid_file"
   if [[ ! -x speech/.venv/bin/python || ! -f data/models/qwen3-tts/model.safetensors ]]; then
     echo "MLX speech is not installed on this Mac. Run ./setup.sh --with-speech first." >&2
     return 1
   fi
-  if [[ ! -x node_modules/.bin/tsx ]]; then
+  if ! command -v node >/dev/null 2>&1 || [[ ! -f node_modules/tsx/package.json ]]; then
     echo "Host JavaScript dependencies are missing. Run ./setup.sh --with-speech first." >&2
     return 1
   fi
   NARAD_TTS_TOKEN="$NARAD_TTS_TOKEN" NARAD_TTS_BIND_HOST=0.0.0.0 NARAD_TTS_PORT=4321 \
-    nohup "$project_dir/node_modules/.bin/tsx" "$project_dir/server/tts-host.ts" >>"$tts_log_file" 2>&1 &
+    nohup node --import tsx "$project_dir/server/tts-host.ts" >>"$tts_log_file" 2>&1 &
   local pid=$!
   local process_start
   process_start="$(ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -93,21 +107,57 @@ start_tts() {
       echo "The macOS TTS host stopped during startup. See $tts_log_file" >&2
       return 1
     fi
-    if curl -fsS -H "Authorization: Bearer $NARAD_TTS_TOKEN" http://127.0.0.1:4321/health >/dev/null 2>&1; then return 0; fi
+    if tts_healthy; then return 0; fi
     sleep 0.25
   done
   echo "The macOS TTS host did not become ready. See $tts_log_file" >&2
+  stop_tts
   return 1
 }
 
 stop_tts() {
   if ! tts_running; then rm -f "$tts_pid_file"; return 0; fi
-  local pid
+  local pid children child command active
   pid="$(sed -n '1p' "$tts_pid_file")"
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  for child in $children; do
+    command="$(ps -p "$child" -o command= 2>/dev/null || true)"
+    if [[ "$command" == *"$project_dir/server/tts-host.ts"* ]]; then kill "$child" 2>/dev/null || true; fi
+  done
   kill "$pid" 2>/dev/null || true
-  for _ in {1..20}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  for _ in {1..20}; do
+    active=0
+    kill -0 "$pid" 2>/dev/null && active=1
+    for child in $children; do
+      command="$(ps -p "$child" -o command= 2>/dev/null || true)"
+      if [[ "$command" == *"$project_dir/server/tts-host.ts"* ]] && kill -0 "$child" 2>/dev/null; then active=1; fi
+    done
+    [[ "$active" == 0 ]] && break
+    sleep 0.1
+  done
   if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+  for child in $children; do
+    command="$(ps -p "$child" -o command= 2>/dev/null || true)"
+    if [[ "$command" == *"$project_dir/server/tts-host.ts"* ]] && kill -0 "$child" 2>/dev/null; then kill -KILL "$child" 2>/dev/null || true; fi
+  done
   rm -f "$tts_pid_file"
+}
+
+show_tts_status() {
+  local response state pid
+  pid="$(sed -n '1p' "$tts_pid_file" 2>/dev/null || true)"
+  if response="$(tts_health_response 2>/dev/null)"; then
+    state="$(printf '%s\n' "$response" | sed -n 's/.*"state":"\([^"]*\)".*/\1/p')"
+    if tts_running; then
+      echo "macOS TTS: responding (state: ${state:-unknown}, PID $pid)"
+    else
+      echo "macOS TTS: responding (state: ${state:-unknown}, not managed by start.sh)"
+    fi
+  elif tts_running; then
+    echo "macOS TTS: process running (PID $pid), but health check failed"
+  else
+    echo "macOS TTS: stopped or unreachable"
+  fi
 }
 
 show_status() {
@@ -117,9 +167,7 @@ show_status() {
   else echo "  Docker Compose or runtime configuration is not available."
   fi
   echo
-  if tts_running; then echo "macOS TTS: running (PID $(sed -n '1p' "$tts_pid_file"))"
-  else echo "macOS TTS: stopped"
-  fi
+  show_tts_status
   if curl -fsS http://127.0.0.1:${NARAD_PORT:-4318}/api/health >/dev/null 2>&1; then echo "Narad API: ready at http://127.0.0.1:${NARAD_PORT:-4318}"
   else echo "Narad API: unavailable"
   fi
@@ -151,7 +199,7 @@ login_provider() {
 case "${1:-}" in
   start) start_all ;;
   restart) kill_all; start_all ;;
-  kill|stop) kill_all ;;
+  kill|stop) kill_all; ensure_runtime; show_status ;;
   status) ensure_runtime; show_status ;;
   login) login_provider "${2:-}" ;;
   *) usage; exit 2 ;;

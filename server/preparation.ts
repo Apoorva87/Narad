@@ -415,8 +415,9 @@ export class PreparationService {
         const reviewable:Pending[]=[];
         for(const item of batch){
           const structured=authoredById.get(item.task.id)!;
-          item.teaching=normalizeTeaching(authoredSectionSchema.parse({...structured,units:structured.units.map(unit=>({...unit,question:unit.question??undefined}))}));
-          item.issues=checkTeaching(item.task,item.teaching);
+          const authoredTeaching=authoredSectionSchema.parse({...structured,units:structured.units.map(unit=>({...unit,question:unit.question??undefined}))});
+          item.issues=checkTeaching(item.task,authoredTeaching);
+          item.teaching=item.issues.length?authoredTeaching:normalizeTeaching(authoredTeaching);
           if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item)}else{await mark(item,{state:'reviewing'});reviewable.push(item)}
         }
         if(!reviewable.length)continue;
@@ -469,8 +470,10 @@ export class PreparationService {
         active.stage = issues.length ? `Revising ${index}/${tasks.length} · draft ${draft} · ${progressIssue(issues)}` : `Writing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         await mark({ state: 'writing', error: undefined }, true);
         const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues, draft: teaching }) : ''), agentSectionSchema, images));
-        teaching = normalizeTeaching(authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) }));
-        issues = checkTeaching(task, teaching); if (issues.length) continue;
+        const authoredTeaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) });
+        issues = checkTeaching(task, authoredTeaching);
+        teaching = issues.length ? authoredTeaching : normalizeTeaching(authoredTeaching);
+        if (issues.length) continue;
         await mark({ state: 'reviewing' });
         active.stage = `Reviewing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         const review = reviewSchema.parse(await run('review', task.id, prompt('review', { source: context, draft: teaching }), reviewSchema, images));
