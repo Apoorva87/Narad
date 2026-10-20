@@ -18,7 +18,7 @@ it('does not publish rejected content and lets the learner stop revision',async(
  const {service,store}=await setup(runner);const started=service.start('source','codex');await expect.poll(()=>service.state().jobs[0].stage).toContain('Unsupported interpretation of the units.');expect(store.list()).toEqual([]);service.stop(started.id);expect((await finished(service)).status).toBe('stopped');expect(store.list()).toEqual([]);
 });
 it('prepares for the chosen level and keeps its progress in the item folder',async()=>{const prompts:string[]=[];const {service,store}=await setup(async r=>{prompts.push(r.prompt);return answer(r)});service.start('source','codex','advanced');const job=await finished(service);expect(job.status).toBe('completed');expect(prompts.every(p=>p.includes('Learner familiarity is advanced')&&p.includes('expert reader'))).toBe(true);expect(store.get(job.lessonId!)!.familiarity).toBe('advanced');expect(store.getBundle('source')!.familiarity).toBe('advanced');const {existsSync}=await import('node:fs');expect(existsSync(join(store.libraryRoot,'time','preparation','progress.json'))).toBe(true);expect(job.folder).toBe(join(store.libraryRoot,'time'));expect(job.slug).toBe('time')});
-it('prepares with the settings in force when the job starts and keeps a snapshot',async()=>{const requests:AgentRequest[]=[];const {service,store}=await setup(async r=>{requests.push(r);return answer(r)});const settings=store.getSettings();settings.prompts.walkthroughGuidance='CUSTOM WALKTHROUGH RULE';settings.prompts.summary='Summarise briefly. {{sections}}';settings.lessons.expertName='Dr Rao';settings.preparation.codexModel='gpt-test';settings.preparation.timeoutMinutes=5;store.saveSettings(settings);service.start('source','codex');settings.prompts.summary='CHANGED AFTER START {{sections}}';store.saveSettings(settings);const job=await finished(service);expect(job.status).toBe('completed');const author=requests.find(r=>r.kind==='author')!;expect(author.prompt).toContain('CUSTOM WALKTHROUGH RULE');expect(author.prompt).not.toMatch(/\{\{/);expect(author.model).toBe('gpt-test');expect(author.timeoutMs).toBe(300_000);expect(requests.find(r=>r.kind==='summary')!.prompt).toContain('Summarise briefly.');const lesson=store.get(job.lessonId!)!;expect(lesson.modes.dialogue!.sections.flatMap(s=>s.blocks).some(b=>b.kind==='dialogue'&&b.speaker==='Dr Rao')).toBe(true);const {readFileSync}=await import('node:fs');expect(JSON.parse(readFileSync(join(store.libraryRoot,'time','preparation','settings.json'),'utf8')).prompts.summary).toBe('Summarise briefly. {{sections}}')});
+it('prepares with the settings in force when the job starts and keeps a snapshot',async()=>{const requests:AgentRequest[]=[];const {service,store}=await setup(async r=>{requests.push(r);return answer(r)});const settings=store.getSettings();settings.prompts.walkthroughGuidance='CUSTOM WALKTHROUGH RULE';settings.prompts.summary='Summarise briefly. {{sections}}';settings.lessons.expertName='Dr Rao';settings.preparation.codexModel='gpt-test';settings.preparation.timeoutMinutes=5;store.saveSettings(settings);service.start('source','codex');settings.prompts.summary='CHANGED AFTER START {{sections}}';store.saveSettings(settings);const job=await finished(service);expect(job.status).toBe('completed');const author=requests.find(r=>r.kind==='author')!;expect(author.prompt).toContain('CUSTOM WALKTHROUGH RULE');expect(author.prompt).not.toMatch(/\{\{/);expect(author.model).toBe('gpt-test');expect(author.reasoningEffort).toBe('low');expect(author.timeoutMs).toBe(300_000);expect(requests.find(r=>r.kind==='summary')!.prompt).toContain('Summarise briefly.');const lesson=store.get(job.lessonId!)!;expect(lesson.modes.dialogue!.sections.flatMap(s=>s.blocks).some(b=>b.kind==='dialogue'&&b.speaker==='Dr Rao')).toBe(true);const {readFileSync}=await import('node:fs');expect(JSON.parse(readFileSync(join(store.libraryRoot,'time','preparation','settings.json'),'utf8')).prompts.summary).toBe('Summarise briefly. {{sections}}')});
 it('keeps revising until review approves and relays the current work',async()=>{
  let reviews=0;let serviceRef:PreparationService;const authorStages:string[]=[];const reviewStages:string[]=[];
  const runner=async(r:AgentRequest)=>{const stage=serviceRef.state().jobs[0].stage;if(r.kind==='author')authorStages.push(stage);if(r.kind==='review'){reviewStages.push(stage);reviews++;if(reviews<4)return{approved:false,issues:['Explain why the 42 ms measurement is qualified.']}}return answer(r)};
@@ -83,6 +83,36 @@ async function setupThree(run:Run,atOnce=1){
  return {dir,store,service,runner,folder,progress};
 }
 const failThird:Run=async r=>{if(r.kind==='author'&&taskOf(r)==='r0-s02-p0')throw new Error('Agent failed. boom');return teach(r)};
+const batchIds=(request:AgentRequest)=>[...new Set([...request.prompt.matchAll(/"taskId":"([^"]+)"/g)].map(match=>match[1]))];
+const batchTeaching=(taskId:string,index:number)=>({id:'s0'+index,introduction:'Learn delay.',hostQuestion:'What is delay?',units:[{id:'s0'+index+'-u00',walkthrough:`The value ${[42,7,3][index]} is explained as elapsed time.`,walkthroughSpoken:'The value is explained as elapsed time.',dialogue:`Picture a stopwatch measuring ${[42,7,3][index]}.`,dialogueSpoken:'Picture a stopwatch measuring the value.',question:null}],visuals:[]});
+const batchAnswer:Run=async request=>{
+ if(request.kind==='summary')return answer(request);
+ const ids=batchIds(request);
+ if(request.kind==='review')return{results:ids.map(taskId=>({taskId,approved:true,issues:[]}))};
+ return{results:ids.map(taskId=>({taskId,teaching:batchTeaching(taskId,Number(/-s(\d+)-/.exec(taskId)![1]))}))};
+};
+it('uses one native Codex coordinator for a three-section batch',async()=>{
+ const requests:AgentRequest[]=[];const t=await setupThree(async(request,signal)=>{requests.push(request);return batchAnswer(request,signal)},3);
+ t.service.start('source','codex');const job=await finished(t.service);expect(job.status).toBe('completed');
+ const authors=requests.filter(request=>request.kind==='author');const reviews=requests.filter(request=>request.kind==='review');
+ expect(authors).toHaveLength(1);expect(reviews).toHaveLength(1);
+ expect(authors[0]).toMatchObject({multiAgent:true,reasoningEffort:'low',model:'gpt-6-sol'});
+ expect(batchIds(authors[0])).toEqual(['r0-s00-p0','r0-s01-p0','r0-s02-p0']);
+ expect(job.sections.map(section=>section.state)).toEqual(['done','done','done']);
+});
+it('requeues only a rejected section and relays its review issue',async()=>{
+ const requests:AgentRequest[]=[];const authorStages:string[]=[];let serviceRef:PreparationService;let reviewRound=0;
+ const t=await setupThree(async request=>{
+  requests.push(request);const ids=batchIds(request);
+  if(request.kind==='summary')return answer(request);
+  if(request.kind==='review'){const reject=reviewRound++===0;return{results:ids.map(taskId=>({taskId,approved:!reject||taskId!=='r0-s01-p0',issues:reject&&taskId==='r0-s01-p0'?['Explain why the seven-second wait is elapsed time.']:[]}))}}
+  authorStages.push(serviceRef.state().jobs[0].stage);
+  return{results:ids.map(taskId=>{const index=Number(/-s(\d+)-/.exec(taskId)![1]);return{taskId,teaching:batchTeaching(taskId,index)}})};
+ },3);serviceRef=t.service;
+ t.service.start('source','codex');expect((await finished(t.service)).status).toBe('completed');
+ expect(requests.filter(request=>request.kind==='author').map(batchIds)).toEqual([['r0-s00-p0','r0-s01-p0','r0-s02-p0'],['r0-s01-p0']]);
+ expect(authorStages[1]).toContain('Explain why the seven-second wait is elapsed time.');
+});
 it('continues after an interrupted run by writing only the unfinished section',async()=>{
  const t=await setupThree(failThird);t.service.start('source','codex');const first=await finished(t.service);
  expect(first.status).toBe('failed');expect(first.completed).toBe(2);expect(first.total).toBe(3);
@@ -108,16 +138,11 @@ it('marks a running progress file interrupted on startup and launches nothing',a
  await expect.poll(async()=>(await t.progress()).status).toBe('interrupted');
  await new Promise(r=>setTimeout(r,50));expect(calls).toEqual([]);
 });
-it('prepares sections two at a time and records both when they finish together',async()=>{
- const pending:{task:string;resolve:()=>void}[]=[];let inFlight=0,peak=0;
- const t=await setupThree(async r=>{if(r.kind!=='author')return teach(r);inFlight++;peak=Math.max(peak,inFlight);await new Promise<void>(resolve=>pending.push({task:taskOf(r),resolve}));inFlight--;return teach(r)},2);
- t.service.start('source','codex');
- await expect.poll(()=>pending.length).toBe(2);await new Promise(r=>setTimeout(r,30));expect(pending.length).toBe(2);expect(inFlight).toBe(2);
- expect(pending.map(p=>p.task).sort()).toEqual(['r0-s00-p0','r0-s01-p0']);
- const [a,b]=pending;a.resolve();b.resolve();
- await expect.poll(async()=>{const p=await t.progress();return [p.sections['r0-s00-p0'].state,p.sections['r0-s01-p0'].state]}).toEqual(['done','done']);
- await expect.poll(()=>pending.length).toBe(3);pending[2].resolve();
- expect((await finished(t.service)).status).toBe('completed');expect(peak).toBe(2);
+it('honors the configured native-subagent batch width',async()=>{
+ const requests:AgentRequest[]=[];const t=await setupThree(async(r,s)=>{requests.push(r);return batchAnswer(r,s)},2);
+ t.service.start('source','codex');expect((await finished(t.service)).status).toBe('completed');
+ expect(requests.filter(request=>request.kind==='author').map(batchIds)).toEqual([['r0-s00-p0','r0-s01-p0'],['r0-s02-p0']]);
+ expect(requests.filter(request=>request.kind==='author').map(request=>request.multiAgent)).toEqual([true,false]);
 });
 it('starts over by archiving earlier sections and writing every section again',async()=>{
  const t=await setupThree(failThird);t.service.start('source','codex');await finished(t.service);
@@ -203,13 +228,13 @@ it('keeps a fixed trust boundary around every agent task when teaching prompts a
 it('wraps source and learner data in untrusted JSON values inside every preparation prompt',async()=>{const requests:AgentRequest[]=[];const {service}=await setup(async r=>{requests.push(r);return answer(r)});service.start('source','codex');expect((await finished(service)).status).toBe('completed');expect(requests.find(r=>r.kind==='author')!.prompt).toContain('{"trust":"untrusted","label":"input"');expect(requests.find(r=>r.kind==='review')!.prompt).toContain('{"trust":"untrusted","label":"draft"');expect(requests.find(r=>r.kind==='summary')!.prompt).toContain('{"trust":"untrusted","label":"sections"')});
 it('reuses compatible approved sections after the preparation service restarts',async()=>{
  let run=1;const authored:string[]=[];const runner=async(r:AgentRequest,s:AbortSignal)=>{if(r.kind==='author'){const section=r.name.match(/-(s\d+)-/)?.[1]??'s00';authored.push(run+':'+section);if(run===1&&section==='s01')throw new Error('provider stopped')}return sectionAnswer(r)};
- const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');service.start('source','codex');expect((await finished(service)).status).toBe('failed');
+ const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');const settings=store.getSettings();settings.preparation.sectionsAtOnce=1;store.saveSettings(settings);service.start('source','codex');expect((await finished(service)).status).toBe('failed');
  const restarted=new PreparationService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
  expect(authored.filter(call=>call.startsWith('2:'))).toEqual(['2:s01']);
 });
 it('regenerates a previously approved section when its source changes',async()=>{
  let run=1;const authored:string[]=[];const runner=async(r:AgentRequest,s:AbortSignal)=>{if(r.kind==='author'){const section=r.name.match(/-(s\d+)-/)?.[1]??'s00';authored.push(run+':'+section);if(run===1&&section==='s01')throw new Error('provider stopped')}return sectionAnswer(r)};
- const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');service.start('source','codex');expect((await finished(service)).status).toBe('failed');
+ const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');const settings=store.getSettings();settings.preparation.sectionsAtOnce=1;store.saveSettings(settings);service.start('source','codex');expect((await finished(service)).status).toBe('failed');
  const bundle=store.getBundle('source')!;bundle.sources[0].markdown='# First\n\nA delay of 43 ms.\n\n# Second\n\nA delay of 7 ms.';store.saveBundle(bundle,[]);
  const restarted=new PreparationService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
  expect(authored.filter(call=>call.startsWith('2:')).sort()).toEqual(['2:s00','2:s01']);

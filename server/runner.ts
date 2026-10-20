@@ -6,7 +6,7 @@ import { addUsage, type AgentUsage, type Provider } from '../shared/preparation'
 import type { AgentRunner } from './agent-runner';
 
 export type CallRecord = { n: number; step: string; task: string; startedAt: string; durationMs: number; outcome: 'ok' | 'retried' | 'failed'; error?: string; usage?: AgentUsage };
-export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number };
+export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
 
 /**
  * Runs every preparation agent call the same way. Files per call in `<dir>/calls/`:
@@ -40,7 +40,7 @@ export class CallRunner {
     };
     for (let attempt = 1; ; attempt++) {
       try {
-        const raw = await this.runner.run({ provider: input.provider, kind: input.step, prompt: input.prompt, schema, cwd: calls, name, images: input.images, model: input.model, timeoutMs: input.timeoutMs }, signal, onSession, u => { usage = addUsage(usage, u); });
+        const raw = await this.runner.run({ provider: input.provider, kind: input.step, prompt: input.prompt, schema, cwd: calls, name, images: input.images, model: input.model, timeoutMs: input.timeoutMs, multiAgent: input.multiAgent, reasoningEffort: input.reasoningEffort }, signal, onSession, u => { usage = addUsage(usage, u); });
         signal.throwIfAborted();
         const value = input.schema.parse(raw);
         await writeFile(base + '.result.json', JSON.stringify(value, null, 2));

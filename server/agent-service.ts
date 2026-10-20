@@ -10,6 +10,7 @@ const requestSchema=z.object({
   prompt:z.string().min(1).max(8_000_000),schema:z.record(z.string(),z.unknown()),cwd:z.string().min(1).max(1000),
   name:z.string().regex(/^[a-zA-Z0-9._-]+$/).max(180),images:z.array(z.string().min(1).max(1200)).max(24),
   model:z.string().max(200).optional(),timeoutMs:z.number().int().min(1_000).max(60*60_000).optional(),research:z.boolean().optional(),
+  multiAgent:z.boolean().optional(),reasoningEffort:z.enum(['low','medium']).optional(),
 }).strict();
 
 function inside(path:string,root:string){const candidate=resolve(path),parent=resolve(root);return candidate===parent||candidate.startsWith(parent+sep)}

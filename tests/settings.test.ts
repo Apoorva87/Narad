@@ -5,6 +5,7 @@ import { LessonStore } from '../server/store';
 describe('settings', () => {
   it('ships valid defaults and fills only known slots', () => {
     expect(settingsSchema.safeParse(defaultSettings).success).toBe(true);
+    expect(defaultSettings.preparation).toMatchObject({ codexModel: 'gpt-6-sol', codexReasoning: 'low', sectionsAtOnce: 3 });
     expect(renderPrompt('Hi {{ level }} and {{other}}', { level: 'advanced' })).toBe('Hi advanced and {{other}}');
   });
   it('rejects prompts that drop a required slot or use an unknown one', () => {

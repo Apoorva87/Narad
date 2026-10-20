@@ -35,6 +35,14 @@ it('forwards an authenticated agent job and reports its container session',async
  await expect(remote.run(request,new AbortController().signal,pid=>sessions.push(pid))).resolves.toEqual({lesson:'ready'});
  expect(received).toEqual(request);expect(sessions).toEqual([74,null]);expect(remote.available()).toEqual([{id:'codex',available:true},{id:'claude',available:true}]);
 });
+it('forwards native multi-agent and reasoning options through the isolated agent service',async()=>{
+ let received:AgentRequest|undefined;
+ const local:AgentRunner={available:()=>[{id:'codex',available:true}],run:async value=>{received=value;return{lesson:'ready'}}};
+ const url=await listen(createAgentService(local,'agent-secret',['/data/preparations']));
+ const coordinated={...request,multiAgent:true,reasoningEffort:'low' as const};
+ await expect(new RemoteAgentRunner(url,'agent-secret',['codex']).run(coordinated,new AbortController().signal)).resolves.toEqual({lesson:'ready'});
+ expect(received).toEqual(coordinated);
+});
 
 it('forwards token usage from the agent container to the caller',async()=>{
  const local:AgentRunner={available:()=>[{id:'codex',available:true}],run:async(_value,_signal,_onSession,onUsage)=>{onUsage?.({inputTokens:120,outputTokens:30,cachedTokens:10});return{lesson:'ready'}}};

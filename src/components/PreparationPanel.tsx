@@ -8,7 +8,7 @@ import { familiarities, familiarityLabels, type Familiarity } from '../../shared
 const sectionStates: Record<string, string> = { waiting: 'Waiting', writing: 'Writing', reviewing: 'Reviewing', done: 'Done', failed: 'Failed' };
 function duration(ms?: number) { if (ms === undefined) return ''; const total = Math.round(ms / 1000); return total < 60 ? total + 's' : Math.floor(total / 60) + 'm ' + (total % 60) + 's'; }
 function tokens(n: number) { return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n); }
-export function usageLine(u: AgentUsage) { return 'Tokens: ' + tokens(u.inputTokens) + ' in · ' + tokens(u.outputTokens) + ' out' + (u.cachedTokens ? ' (cached ' + tokens(u.cachedTokens) + ')' : '') + (u.costUsd !== undefined ? ' · $' + u.costUsd.toFixed(2) : ''); }
+export function usageLine(u: AgentUsage) { return 'Tokens: ' + tokens(u.inputTokens) + ' in · ' + tokens(u.outputTokens) + ' out' + (u.cachedTokens ? ' (cached ' + tokens(u.cachedTokens) + ')' : '') + (u.costUsd !== undefined ? ' · $' + u.costUsd.toFixed(2) : '') + (u.partial ? ' · coordinator only; subagent tokens not reported' : ''); }
 function SectionRow({ section }: { section: PreparationSection }) {
   const active = section.state === 'writing' || section.state === 'reviewing';
   return <li className={'section-row state-' + section.state}>

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Provider, PreparationState, AgentUsage } from '../shared/preparation';
 import { hasFixedPromptPolicy } from './prompt-security';
 export type { AgentUsage };
-export type AgentRequest = { provider:Provider; kind:'author'|'review'|'summary'|'research'|'tutor'; prompt:string; schema:Record<string,unknown>; cwd:string; name:string; images:string[]; model?:string; timeoutMs?:number; research?:boolean };
+export type AgentRequest = { provider:Provider; kind:'author'|'review'|'summary'|'research'|'tutor'; prompt:string; schema:Record<string,unknown>; cwd:string; name:string; images:string[]; model?:string; timeoutMs?:number; research?:boolean; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
 export type AgentRunner = {run:(request:AgentRequest,signal:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(usage:AgentUsage)=>void)=>Promise<unknown>; available:()=>PreparationState['providers']};
 const count=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>=0?value:0;
 /** Usage from a Claude `--output-format json` envelope; undefined when it carries none. Never throws. */
@@ -18,7 +18,7 @@ export function claudeUsage(envelope:unknown):AgentUsage|undefined {
   return {inputTokens:count(u.input_tokens),outputTokens:count(u.output_tokens),...(cached>0&&{cachedTokens:cached}),...(cost!==undefined&&{costUsd:cost})};
 }
 /** Summed `turn.completed` usage from Codex `--json` JSONL output; undefined when no event carries usage. Never throws. */
-export function codexUsage(stdout:string):AgentUsage|undefined {
+export function codexUsage(stdout:string,partial=false):AgentUsage|undefined {
   let total:AgentUsage|undefined;
   for(const line of stdout.split(/\r?\n/))try{
     const event=JSON.parse(line) as {type?:string;usage?:Record<string,unknown>};
@@ -26,7 +26,7 @@ export function codexUsage(stdout:string):AgentUsage|undefined {
     const cached=count(event.usage.cached_input_tokens);
     total={inputTokens:(total?.inputTokens??0)+count(event.usage.input_tokens),outputTokens:(total?.outputTokens??0)+count(event.usage.output_tokens),...((total?.cachedTokens||cached)&&{cachedTokens:(total?.cachedTokens??0)+cached})};
   } catch { /* not a JSON event line */ }
-  return total;
+  return total&&partial?{...total,partial:true}:total;
 }
 export function executeProcess(options:{command:string;args:string[];cwd:string;input:string;signal:AbortSignal;timeoutMs:number;maxBytes?:number;onSession?:(pid:number|null)=>void;onOutput?:(text:string)=>void}):Promise<{stdout:string;stderr:string}> {
   return new Promise((resolve,reject)=>{
@@ -61,9 +61,9 @@ export function executeProcess(options:{command:string;args:string[];cwd:string;
     host.send({type:'start',command:options.command,args:options.args,cwd:options.cwd,input:options.input});
   });
 }
-export function providerArgs(provider:Provider,options:{schemaPath:string;outputPath:string;schema:Record<string,unknown>;images:string[];research:boolean;model?:string}):string[] {
+export function providerArgs(provider:Provider,options:{schemaPath:string;outputPath:string;schema:Record<string,unknown>;images:string[];research:boolean;model?:string;multiAgent?:boolean;reasoningEffort?:'low'|'medium'}):string[] {
   const model=options.model?(provider==='codex'?['-m',options.model]:['--model',options.model]):[];
-  if(provider==='codex')return ['exec','--ignore-user-config','--ignore-rules','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--json','--color','never','-c','features.shell_tool=false','-c','features.js_repl=false','-c','features.multi_agent=false','-c','web_search="'+(options.research?'live':'disabled')+'"','--output-schema',options.schemaPath,'--output-last-message',options.outputPath,...model,...options.images.flatMap(path=>['--image',path]),'-'];
+  if(provider==='codex')return ['exec','--ignore-user-config','--ignore-rules',...(options.multiAgent?[]:['--ephemeral']),'--skip-git-repo-check','--sandbox','read-only','--json','--color','never','-c','features.shell_tool=false','-c','features.js_repl=false','-c','features.multi_agent='+(options.multiAgent?'true':'false'),...(options.reasoningEffort?['-c','model_reasoning_effort="'+options.reasoningEffort+'"']:[]),'-c','web_search="'+(options.research?'live':'disabled')+'"','--output-schema',options.schemaPath,'--output-last-message',options.outputPath,...model,...options.images.flatMap(path=>['--image',path]),'-'];
   const allowed=options.research?'WebSearch':'Read';
   return ['--print','--safe-mode','--restricted','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--permission-mode','dontAsk','--tools',allowed,'--allowedTools',allowed,'--no-session-persistence','--output-format','json','--json-schema',JSON.stringify(options.schema),...model];
 }
@@ -80,10 +80,10 @@ export const cliRunner:AgentRunner={
     await writeFile(schemaPath,JSON.stringify(request.schema));await writeFile(join(request.cwd,request.name+'.prompt.txt'),request.prompt);
     const log=openSync(join(request.cwd,request.name+'.events.log'),'w');
     let result:{stdout:string;stderr:string};
-    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); } finally { closeSync(log); }
+    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model,multiAgent:request.multiAgent,reasoningEffort:request.reasoningEffort}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); } finally { closeSync(log); }
     signal.throwIfAborted();
     let value:unknown;
-    if(request.provider==='codex') {try{const usage=codexUsage(result.stdout);if(usage)onUsage?.(usage)}catch{/* usage is best effort */}value=JSON.parse(await readFile(outputPath,'utf8'));}
+    if(request.provider==='codex') {try{const usage=codexUsage(result.stdout,request.multiAgent);if(usage)onUsage?.(usage)}catch{/* usage is best effort */}value=JSON.parse(await readFile(outputPath,'utf8'));}
     else {const envelope=JSON.parse(result.stdout);try{const usage=claudeUsage(envelope);if(usage)onUsage?.(usage)}catch{/* usage is best effort */}if(envelope.is_error)throw new Error('Claude could not complete preparation: '+String(envelope.result??envelope.subtype));value=envelope.structured_output;if(!value && typeof envelope.result==='string')value=JSON.parse(envelope.result);}
     if(!value)throw new Error('Agent returned no structured teaching content.');
     await writeFile(outputPath,JSON.stringify(value,null,2));return value;

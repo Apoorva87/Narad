@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, reconcileReviewIssues, type TeachingTask } from '../server/generation-content';
+import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, normalizeTeaching, reconcileReviewIssues, type TeachingTask } from '../server/generation-content';
 import { authoredSectionSchema } from '../server/lesson-preparation';
 import type { SourceBundle } from '../shared/sources';
 const article = (id:string) => ({id,title:id,kind:'article' as const,markdown:'# Measure\n\nLatency is 42 ms.\n\n![Plot](source-asset-0)\n\n| A | B |\n| --- | --- |\n| x | 12 |',assets:[{id:'source-asset-0',kind:'image' as const,alt:'Plot',caption:'Plot',src:'/api/source-assets/'+'a'.repeat(64)}],warnings:[],inventory:{images:1,inlineSvg:0,tables:1,savedVisuals:1}});
@@ -53,6 +53,15 @@ it('accepts complete visual dialogues of any length and discards invented hard-l
  expect(reconcileReviewIssues(reviewed,[combined])).toEqual(['it also mislabels the vertical axis as revenue instead of latency.']);
  const differentInventedLimit='Visual source-asset-0 has 18 dialogue turns, exceeding the required maximum of 16 per visual. Merge exchanges to reach 16 or fewer turns.';
  expect(reconcileReviewIssues(reviewed,[differentInventedLimit])).toEqual([]);
+});
+it('removes generated speaker prefixes from spoken fields without changing their explanation',()=>{
+ const task=buildTeachingPlan(bundle)[0];const teaching=draft(task);
+ const labeled={...teaching,units:teaching.units.map((unit,index)=>({...unit,dialogueSpoken:index?'Connect to the host: example.com. Ask the expert: on call.':'Host: Why this value? Expert: Because it measures elapsed time.'})),visuals:teaching.visuals.map(visual=>({...visual,dialogueTurns:[{role:'host' as const,markdown:'Why?',spokenText:'Host: Why?'},{role:'expert' as const,markdown:'Elapsed time.',spokenText:'Expert: Elapsed time.'}]}))};
+ const normalized=normalizeTeaching(authoredSectionSchema.parse(labeled));
+ expect(normalized.units[0].dialogueSpoken).toBe('Why this value? Because it measures elapsed time.');
+ expect(normalized.visuals[0].dialogueTurns?.map(turn=>turn.spokenText)).toEqual(['Why?','Elapsed time.']);
+ expect(normalized.units[1].dialogueSpoken).toBe('Connect to the host: example.com. Ask the expert: on call.');
+ expect(normalized.units[0].dialogue).toBe(teaching.units[0].dialogue);
 });
 it('does not accept invented non-URL source labels as discovered research links',async()=>{
  const {researchSchema}=await import('../server/generation-content');expect(researchSchema.safeParse({links:['Some authoritative article'],rationale:'Helpful'}).success).toBe(false);

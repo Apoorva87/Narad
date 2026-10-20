@@ -13,7 +13,7 @@ import { prepareSources } from './intake';
 import { authoredSectionSchema, type AuthoredSection } from './lesson-preparation';
 import { CallRunner, type CallInput, type CallRecord } from './runner';
 import { secureAgentPrompt, untrustedData } from './prompt-security';
-import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, reconcileReviewIssues, researchSchema, reviewSchema, sectionHash, summarySchema, type TeachingTask } from './generation-content';
+import { agentSectionSchema, authorBatchSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, normalizeTeaching, reconcileReviewIssues, researchSchema, reviewBatchSchema, reviewSchema, sectionHash, summarySchema, type TeachingTask } from './generation-content';
 
 type SectionState = 'waiting' | 'writing' | 'reviewing' | 'done' | 'failed';
 /** `preparation/progress.json`: one item's run state, per-section state and per-call records. */
@@ -32,7 +32,7 @@ export type Progress = {
 };
 type SavedSection = { task: string; title: string; sourceHash: string; teaching: AuthoredSection };
 type Active = { slug: string; title: string; provider: Provider; stage: string; stopping: boolean; startedAt: string; controller: AbortController; done: Promise<void> };
-type Run = (step: CallInput['step'], task: string, text: string, schema: CallInput['schema'], images?: string[]) => Promise<unknown>;
+type Run = (step: CallInput['step'], task: string, text: string, schema: CallInput['schema'], images?: string[], options?:Pick<CallInput,'multiAgent'|'reasoningEffort'>) => Promise<unknown>;
 
 const PROGRESS = 'preparation/progress.json';
 const INTERRUPTED = 'Preparation was interrupted when the server stopped. Finished sections are saved; press Continue to resume.';
@@ -160,8 +160,8 @@ export class PreparationService {
   private saved(slug: string, task: TeachingTask, hash: string): AuthoredSection | undefined {
     const saved = this.fs.readJson<SavedSection>(slug, `preparation/sections/${task.id}.json`).value;
     if (saved?.sourceHash !== hash) return undefined;
-    const teaching = authoredSectionSchema.safeParse(saved.teaching);
-    return teaching.success && !checkTeaching(task, teaching.data).length ? teaching.data : undefined;
+    const teaching = authoredSectionSchema.safeParse(saved.teaching);const normalized=teaching.success?normalizeTeaching(teaching.data):undefined;
+    return normalized && !checkTeaching(task, normalized).length ? normalized : undefined;
   }
 
   private async prepare(active: Active, action: PrepareAction, settings: Settings) {
@@ -188,9 +188,9 @@ export class PreparationService {
     const calls = new CallRunner(dir, this.runner, call => this.update(slug, p => { p.calls.push(call); p.usage = addUsage(p.usage, call.usage); if (!p.usage) delete p.usage; p.calls.sort((a, b) => a.n - b.n); }));
     const prompt = promptKit(settings, level);
     const limits = { chunkChars: settings.preparation.chunkChars, chunkUnits: settings.preparation.chunkUnits };
-    const run: Run = (step, task, text, schema, images = []) => {
+    const run: Run = (step, task, text, schema, images = [], options = {}) => {
       let session: PreparationState['sessions'][number] | undefined;
-      return calls.run({ step, task, prompt: secureAgentPrompt(text, provider, images), schema, images, provider, model: (provider === 'codex' ? settings.preparation.codexModel : settings.preparation.claudeModel) || undefined, timeoutMs: settings.preparation.timeoutMinutes * 60_000 }, signal, pid => {
+      return calls.run({ step, task, prompt: secureAgentPrompt(text, provider, images), schema, images, provider, model: (provider === 'codex' ? settings.preparation.codexModel : settings.preparation.claudeModel) || undefined, timeoutMs: settings.preparation.timeoutMinutes * 60_000, ...(provider==='codex'&&{reasoningEffort:settings.preparation.codexReasoning}), ...options }, signal, pid => {
         if (session) this.sessions = this.sessions.filter(s => s !== session);
         session = pid ? { jobId: slug, provider, pid, startedAt: new Date().toISOString() } : undefined;
         if (session) this.sessions = [...this.sessions, session];
@@ -222,18 +222,10 @@ export class PreparationService {
       p.sections = sections; p.steps.summary = 'pending'; p.steps.publish = 'pending';
     });
 
-    // Up to `sectionsAtOnce` sections in flight. After a failure no new section starts; those in flight finish first.
+    // Codex coordinates a bounded batch through native subagents. A single item and Claude keep the direct path.
     const todo = tasks.filter(task => !results.has(task.id));
-    let failure: unknown; let next = 0;
-    const worker = async () => {
-      while (failure === undefined && !signal.aborted && next < todo.length) {
-        const task = todo[next++];
-        try { results.set(task.id, await this.section(slug, task, tasks, bundle.text, active, run, prompt, settings)); }
-        catch (error) { failure ??= error; }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(settings.preparation.sectionsAtOnce, todo.length) }, worker));
-    if (failure !== undefined) throw failure;
+    if(provider==='codex'&&settings.preparation.sectionsAtOnce>1&&todo.length>1) await this.sectionBatches(slug,todo,tasks,bundle.text,active,run,prompt,settings,results);
+    else for(const task of todo)results.set(task.id,await this.section(slug,task,tasks,bundle.text,active,run,prompt,settings));
     signal.throwIfAborted();
 
     active.stage = 'Preparing the brief summary and synthesis';
@@ -255,6 +247,72 @@ export class PreparationService {
     }
     this.store.insert(lesson, { replace: true });
     await this.update(slug, p => { p.steps.publish = 'done'; p.status = 'completed'; delete p.previous; delete p.archivedLesson; delete p.error; });
+  }
+
+  /** One Codex parent call delegates each item in a batch, then a separate parent call delegates independent reviews. */
+  private async sectionBatches(slug:string,todo:TeachingTask[],tasks:TeachingTask[],intent:string,active:Active,run:Run,prompt:ReturnType<typeof promptKit>,settings:Settings,results:Map<string,AuthoredSection>) {
+    type Pending={task:TeachingTask;index:number;started:number;draft:number;issues:string[];teaching?:AuthoredSection};
+    const signal=active.controller.signal;
+    const queue:Pending[]=todo.map(task=>({task,index:tasks.indexOf(task)+1,started:Date.now(),draft:0,issues:[]}));
+    const mark=(item:Pending,patch:Partial<Progress['sections'][string]>,attempt=false)=>this.update(slug,p=>{
+      const section=p.sections[item.task.id];if(!section)return;Object.assign(section,patch);if(attempt)section.attempts++;if(section.error===undefined)delete section.error;
+    });
+    let batchNumber=0;
+    while(queue.length){
+      signal.throwIfAborted();
+      const batch=queue.splice(0,settings.preparation.sectionsAtOnce);batchNumber++;
+      try{
+        const images:string[]=[];const inputs:unknown[]=[];
+        const folder=join(this.fs.dir(slug),'preparation','calls','images');await mkdir(folder,{recursive:true});
+        for(const item of batch){
+          const visualOrder:unknown[]=[];
+          for(const asset of item.task.assets){
+            if(asset.kind==='video'&&asset.src==='/assets/video-poster.svg'){
+              visualOrder.push({id:asset.id,kind:asset.kind,caption:asset.caption,alt:asset.alt,note:'A video that streams from its source; explain what it shows from its title and caption.'});continue;
+            }
+            const media=asset.src!.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);const file=media&&this.store.mediaPath(media[1],media[2]);
+            if(!file)throw new Error('Saved source visual is missing: '+asset.id);
+            const path=join(folder,item.task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(await readFile(file)).png().toBuffer());images.push(path);
+            visualOrder.push({id:asset.id,kind:asset.kind,caption:asset.caption,alt:asset.alt,attachment:'attached image '+images.length,...(asset.kind==='video'&&{note:'A video that streams from its source; explain what it shows from its title, caption and poster image.'})});
+          }
+          const context={learningIntent:intent,source:{id:item.task.source.id,title:item.task.source.title,url:item.task.source.url},section:{...item.task.section,units:item.task.section.units.filter(unit=>unit.kind!=='note')},visualOrder,allSectionTitles:tasks.filter(candidate=>candidate.source.id===item.task.source.id).map(candidate=>candidate.section.title)};
+          inputs.push({taskId:item.task.id,sourceData:context,...(item.teaching&&{previousDraft:item.teaching,issues:item.issues})});
+          item.draft++;await mark(item,{state:'writing',error:undefined},true);
+        }
+        const titles=batch.map(item=>item.task.section.title).join(' · ');const revising=batch.some(item=>item.issues.length);
+        active.stage=`${revising?'Revising':'Writing'} ${batch.length} section${batch.length===1?'':'s'} ${batch.length>1?'with '+batch.length+' Codex subagents':'in the Codex coordinator'} · draft ${Math.max(...batch.map(item=>item.draft))} · ${revising?progressIssue(batch.flatMap(item=>item.issues)):titles}`;
+        const authorInstructions=`NARAD_MULTI_AGENT_COORDINATOR_V1\nYou are coordinating ${batch.length} independent section-writing task${batch.length===1?'':'s'}. ${batch.length>1?'Spawn exactly one subagent per task item immediately and run them in parallel.':'Complete the single task directly.'} Give each worker only its assigned task item plus the shared teaching rules below. Wait for every worker, verify that every requested taskId appears exactly once, and return the combined structured result. Do not merge sections or omit an item. For an item with previousDraft and issues, return a complete corrected replacement. Attached images are numbered in the task data; inspect them and preserve that association.\n`+
+          prompt('section',{input:inputs})+(batch.some(item=>item.issues.length)?'\n'+prompt('revision',{issues:batch.map(item=>({taskId:item.task.id,issues:item.issues})),draft:batch.map(item=>({taskId:item.task.id,draft:item.teaching}))}):'');
+        const authorIds=batch.map(item=>item.task.id);
+        const authored=authorBatchSchema(authorIds).parse(await run('author','batch-'+batchNumber,authorInstructions,authorBatchSchema(authorIds),images,{multiAgent:batch.length>1,reasoningEffort:settings.preparation.codexReasoning}));
+        const authoredById=new Map(authored.results.map(result=>[result.taskId,result.teaching]));
+        const reviewable:Pending[]=[];
+        for(const item of batch){
+          const structured=authoredById.get(item.task.id)!;
+          item.teaching=normalizeTeaching(authoredSectionSchema.parse({...structured,units:structured.units.map(unit=>({...unit,question:unit.question??undefined}))}));
+          item.issues=checkTeaching(item.task,item.teaching);
+          if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item)}else{await mark(item,{state:'reviewing'});reviewable.push(item)}
+        }
+        if(!reviewable.length)continue;
+        active.stage=`Reviewing ${reviewable.length} section${reviewable.length===1?'':'s'} ${reviewable.length>1?'with '+reviewable.length+' Codex subagents':'in the Codex coordinator'} · ${reviewable.map(item=>item.task.section.title).join(' · ')}`;
+        const reviewInputs=reviewable.map(item=>({taskId:item.task.id,source:inputs[batch.indexOf(item)],draft:item.teaching}));
+        const reviewInstructions=`NARAD_MULTI_AGENT_REVIEW_COORDINATOR_V1\nYou are coordinating ${reviewable.length} independent curriculum reviews. ${reviewable.length>1?'Spawn exactly one reviewer subagent per task item immediately and run them in parallel.':'Complete the single review directly.'} Each reviewer must compare only its assigned source and draft using the shared review rules below. Wait for every reviewer, verify that every requested taskId appears exactly once, and return the combined structured result without softening or combining issues.\n`+prompt('review',{source:reviewInputs.map(item=>({taskId:item.taskId,source:item.source})),draft:reviewInputs.map(item=>({taskId:item.taskId,draft:item.draft}))});
+        const reviewIds=reviewable.map(item=>item.task.id);
+        const reviewed=reviewBatchSchema(reviewIds).parse(await run('review','batch-'+batchNumber,reviewInstructions,reviewBatchSchema(reviewIds),images,{multiAgent:reviewable.length>1,reasoningEffort:settings.preparation.codexReasoning}));
+        const reviewById=new Map(reviewed.results.map(result=>[result.taskId,result]));
+        for(const item of reviewable){
+          const review=reviewById.get(item.task.id)!;const reviewIssues=reconcileReviewIssues(item.teaching!,review.issues);
+          item.issues=reviewIssues.length?reviewIssues:review.issues.length?[]:review.approved?[]:['Content review did not approve this section.'];
+          if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item);continue}
+          const saved:SavedSection={task:item.task.id,title:item.task.section.title,sourceHash:sectionHash(item.task),teaching:item.teaching!};
+          this.fs.writeJson(slug,`preparation/sections/${item.task.id}.json`,saved);results.set(item.task.id,item.teaching!);
+          await mark(item,{state:'done',durationMs:Date.now()-item.started,error:undefined});
+        }
+      }catch(error){
+        if(!signal.aborted)await Promise.all(batch.map(item=>mark(item,{state:'failed',durationMs:Date.now()-item.started,error:message(error)})));
+        throw error;
+      }
+    }
   }
 
   private async section(slug: string, task: TeachingTask, tasks: TeachingTask[], intent: string, active: Active, run: Run, prompt: ReturnType<typeof promptKit>, settings: Settings): Promise<AuthoredSection> {
@@ -285,7 +343,7 @@ export class PreparationService {
         active.stage = issues.length ? `Revising ${index}/${tasks.length} · draft ${draft} · ${progressIssue(issues)}` : `Writing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         await mark({ state: 'writing', error: undefined }, true);
         const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues, draft: teaching }) : ''), agentSectionSchema, images));
-        teaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) });
+        teaching = normalizeTeaching(authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) }));
         issues = checkTeaching(task, teaching); if (issues.length) continue;
         await mark({ state: 'reviewing' });
         active.stage = `Reviewing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;

@@ -6,6 +6,16 @@ import { authoredSectionSchema, compileTeachingLesson, splitSourceSections, type
 export type TeachingTask = { id: string; source: CapturedSource; section: SourceSection; assets: SourceAsset[] };
 export type TeachingOutput = { task: TeachingTask; teaching: AuthoredSection };
 export const agentSectionSchema = authoredSectionSchema.extend({ visuals: z.array(authoredSectionSchema.shape.visuals.element.extend({ dialogueTurns: authoredSectionSchema.shape.visuals.element.shape.dialogueTurns.unwrap() })), units: z.array(authoredSectionSchema.shape.units.element.extend({ question: z.string().nullable() })) });
+function exactBatch<T extends z.ZodRawShape>(taskIds:string[],shape:T) {
+  const ids=taskIds as [string,...string[]];
+  return z.object({results:z.array(z.object({taskId:z.enum(ids),...shape})).length(taskIds.length)}).superRefine((batch,ctx)=>{
+    const returned=(batch as {results:{taskId:string}[]}).results;
+    if(new Set(returned.map(result=>result.taskId)).size!==taskIds.length)ctx.addIssue({code:'custom',path:['results'],message:'Return exactly one result for every taskId.'});
+  });
+}
+/** One coordinator response, keyed so parallel subagent results cannot be assigned to the wrong source section. */
+export function authorBatchSchema(taskIds:string[]){return exactBatch(taskIds,{teaching:agentSectionSchema})}
+export function reviewBatchSchema(taskIds:string[]){return exactBatch(taskIds,{approved:z.boolean(),issues:z.array(z.string())})}
 export const summarySchema = z.object({ sections: z.array(z.object({ title: z.string().min(1), markdown: z.string().min(1), spokenText: z.string().min(1), sourceIds: z.array(z.string()).min(1) })).min(1) });
 export type Summary = z.infer<typeof summarySchema>['sections'];
 export const reviewSchema = z.object({ approved: z.boolean(), issues: z.array(z.string()) });
@@ -60,6 +70,12 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   for (const visual of teaching.visuals) if (visual.dialogueTurns && (!visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert'))) issues.push('Visual '+visual.id+' needs both host and expert dialogue turns.');
   if(teaching.visuals.some(v=>!task.assets.some(a=>a.id===v.id)) || new Set(teaching.visuals.map(v=>v.id)).size!==teaching.visuals.length) issues.push('Unexpected or duplicate visual IDs');
   return issues;
+}
+const speakerPrefix=/(^|[.!?]\s+|\n\s*)(?:Host|Expert)\s*:\s*/gi;
+/** Removes only redundant generated role labels; role remains represented structurally and every spoken word is preserved. */
+export function normalizeTeaching(teaching:AuthoredSection):AuthoredSection {
+  const spoken=(text:string)=>text.replace(speakerPrefix,'$1').trim();
+  return {...teaching,units:teaching.units.map(unit=>({...unit,dialogueSpoken:spoken(unit.dialogueSpoken)})),visuals:teaching.visuals.map(visual=>({...visual,...(visual.dialogueTurns&&{dialogueTurns:visual.dialogueTurns.map(turn=>({...turn,spokenText:spoken(turn.spokenText)}))})}))};
 }
 export function reconcileReviewIssues(teaching:AuthoredSection,issues:string[]):string[] {
   return issues.flatMap(issue=>{

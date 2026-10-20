@@ -8,13 +8,14 @@ export type PrepareAction = typeof prepareActions[number];
 export const prepareInput = z.object({ provider: z.enum(providers), familiarity: z.enum(familiarities).optional(), action: z.enum(prepareActions).default('continue') });
 export const renameInput = z.object({ title: z.string().trim().min(1).max(180) });
 /** Tokens (and cost, when the agent reports it) spent by one or more agent calls. */
-export type AgentUsage = { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number };
+export type AgentUsage = { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number; /** True when a provider reports only its coordinator, not child agents. */ partial?: boolean };
 export function addUsage(total: AgentUsage | undefined, more: AgentUsage | undefined): AgentUsage | undefined {
   if (!more) return total;
   if (!total) return { ...more };
   const sum: AgentUsage = { inputTokens: total.inputTokens + more.inputTokens, outputTokens: total.outputTokens + more.outputTokens };
   if (total.cachedTokens !== undefined || more.cachedTokens !== undefined) sum.cachedTokens = (total.cachedTokens ?? 0) + (more.cachedTokens ?? 0);
   if (total.costUsd !== undefined || more.costUsd !== undefined) sum.costUsd = (total.costUsd ?? 0) + (more.costUsd ?? 0);
+  if (total.partial || more.partial) sum.partial = true;
   return sum;
 }
 export type PreparationSection = { task: string; title: string; state: string; durationMs?: number; error?: string };

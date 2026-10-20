@@ -302,8 +302,11 @@ test('on a phone the tutor panel leaves the presentation controls usable and clo
   const stage = page.getByRole('dialog', { name: /^Presenting/ });
   await stage.getByRole('button', { name: 'Ask tutor' }).click();
   await expect(stage.locator('.presentation-ask')).toBeVisible();
-  for (const name of ['Play narration', 'Next passage', 'Previous passage']) {
-    const button = stage.getByRole('button', { name, exact: true });
+  for (const [name, button] of [
+    ['Narration', stage.getByRole('button', { name: /^(?:Play|Pause) narration$/ })],
+    ['Next passage', stage.getByRole('button', { name: 'Next passage', exact: true })],
+    ['Previous passage', stage.getByRole('button', { name: 'Previous passage', exact: true })],
+  ] as const) {
     const covered = await button.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return !hit || !element.contains(hit); });
     expect(covered, name).toBe(false);
   }

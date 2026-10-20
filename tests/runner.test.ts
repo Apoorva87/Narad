@@ -66,10 +66,10 @@ it('passes cwd, name, kind and the JSON schema to the agent runner', async () =>
 
 it('adds up usage across retried attempts and records it on the call', async () => {
   let n = 0;
-  const { records, runner } = await setup(async (_r, _s, _p, onUsage) => { onUsage?.({ inputTokens: 10, outputTokens: 2, cachedTokens: 4 }); onUsage?.({ inputTokens: 5, outputTokens: 1, costUsd: 0.25 }); return n++ === 0 ? { nope: 1 } : { ok: true }; });
+  const { records, runner } = await setup(async (_r, _s, _p, onUsage) => { onUsage?.({ inputTokens: 10, outputTokens: 2, cachedTokens: 4, partial: true }); onUsage?.({ inputTokens: 5, outputTokens: 1, costUsd: 0.25 }); return n++ === 0 ? { nope: 1 } : { ok: true }; });
   await runner.run(input(), new AbortController().signal);
   expect(records[0].outcome).toBe('retried');
-  expect(records[0].usage).toEqual({ inputTokens: 30, outputTokens: 6, cachedTokens: 8, costUsd: 0.5 });
+  expect(records[0].usage).toEqual({ inputTokens: 30, outputTokens: 6, cachedTokens: 8, costUsd: 0.5, partial: true });
 });
 it('records no usage when the runner reports none', async () => {
   const { records, runner } = await setup(async () => ({ ok: true }));
@@ -80,4 +80,5 @@ it('formats the usage line with cost only when known', async () => {
   const { usageLine } = await import('../src/components/PreparationPanel');
   expect(usageLine({ inputTokens: 1_200_000, outputTokens: 84_000, cachedTokens: 900_000, costUsd: 3.41 })).toBe('Tokens: 1.2M in · 84k out (cached 900k) · $3.41');
   expect(usageLine({ inputTokens: 900, outputTokens: 12 })).toBe('Tokens: 900 in · 12 out');
+  expect(usageLine({ inputTokens: 900, outputTokens: 12, partial: true })).toBe('Tokens: 900 in · 12 out · coordinator only; subagent tokens not reported');
 });
