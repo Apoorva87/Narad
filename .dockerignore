@@ -1,0 +1,11 @@
+.git
+.narad
+data
+dist
+node_modules
+speech/.venv
+artifacts
+.playwright-mcp
+.superpowers
+*.log
+.DS_Store

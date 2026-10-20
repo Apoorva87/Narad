@@ -43,6 +43,26 @@ The API binds to `127.0.0.1`. `server/request-access.ts` checks Host, Origin, an
 
 Agent CLIs run in restricted, non-persistent sessions with bounded output and owned process groups. Lesson source text and learner questions are explicitly treated as untrusted data. Provider availability means the executable exists; the user still signs in through its normal CLI.
 
+### Container boundary
+
+The optional `compose.yaml` deployment keeps the API and agent in separate Linux containers and separate Docker networks. The API communicates with the agent over an authenticated HTTP/NDJSON event stream carried by a shared Unix-domain socket; cancellation closes that stream and aborts the owned CLI process group. The agent service has no TCP listener or published port.
+
+```mermaid
+flowchart LR
+  B[Browser] -->|loopback 4318| API[Narad API container]
+  API -->|authenticated Unix socket stream| AG[Agent container]
+  AG --> C[Codex CLI]
+  AG --> CL[Claude CLI]
+  API -->|authenticated host request| T[macOS MLX TTS]
+  API --> D[(Host data directory)]
+  AG --> J[Preparation and tutor job directories]
+  AG --> H[(Private agent-home volume)]
+```
+
+The agent sees the job directories needed by the existing `AgentRunner` contract, the control socket, and its container-owned home directory. It does not see the lesson databases, general host filesystem, Docker control socket, or the API service network, and it is not given the TTS URL or token. Its root filesystem is read-only and its Linux capabilities are dropped. These operating-system controls reinforce the CLI-level tool restrictions; neither boundary is treated as a substitute for prompt validation and structured-output validation.
+
+MLX remains a macOS host process because Docker Desktop Linux guests cannot use Metal. `server/tts-host.ts` wraps the existing resident worker behind a bearer-authenticated loopback/LAN endpoint, and the API container uses `RemoteSpeechWorker` through `host.docker.internal`. Audio remains transient and is never added to a volume.
+
 ## Persistent and ephemeral data
 
 | Data | Location | Lifetime |
@@ -55,4 +75,3 @@ Agent CLIs run in restricted, non-persistent sessions with bounded output and ow
 | Generated WAV chunks | Browser memory / HTTP response | Released after playback, navigation, or cancellation |
 
 `NARAD_DATA_DIR` relocates application data. Back up SQLite databases only after stopping Narad, or use SQLite backup tooling against a running process.
-

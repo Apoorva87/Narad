@@ -58,6 +58,32 @@ For a production build:
 
 Then open http://127.0.0.1:4318/. Stop either launch command with Ctrl+C.
 
+### Isolated container runtime
+
+Narad can run its web/API and Codex/Claude processes in containers while keeping MLX speech directly on macOS. This requires Docker with Compose plus the normal host speech installation from `./setup.sh --with-speech`.
+
+Authenticate each provider once inside the private `agent-home` Docker volume:
+
+    ./start.sh login codex
+    ./start.sh login claude
+
+Codex uses its device-code flow. Claude uses its normal subscription login and saves the credential in the private `agent-home` volume. If Claude's browser callback cannot reach the container, copy the code shown in the browser and paste it into the terminal when prompted.
+
+Then manage the complete service with:
+
+    ./start.sh start
+    ./start.sh status
+    ./start.sh restart
+    ./start.sh kill
+
+Open http://127.0.0.1:4318/ after `start` reports the API ready. `start` builds two Linux images, starts the internal agent service and public loopback API, and launches the macOS MLX host on port 4321. Private bearer tokens are generated under ignored `.narad/`; they are never printed by `status`.
+
+The API container mounts `./data`. The agent container mounts only `./data/preparations`, `./data/tutor`, a narrow Unix control socket, and its private named home volume. The two containers use separate Docker service networks, and the API is published only on the host loopback interface. The agent does not receive the host home directory, Narad SQLite files, TTS URL or token, or Docker socket. Both containers run as the invoking host user's numeric UID, use a read-only root filesystem, drop Linux capabilities, set `no-new-privileges`, limit PIDs, and use temporary `/tmp` filesystems. Provider authentication remains in the `agent-home` Docker volume when containers restart; `./start.sh kill` does not delete it.
+
+The agent can intentionally write prompts, logs, source-image copies, and structured results inside its two mounted job directories. It cannot use those mounts to reach other host files. To remove credentials as well as containers, explicitly remove the `narad_agent-home` volume after stopping Narad.
+
+Docker Desktop does not expose the Mac Metal GPU to Linux containers, so Qwen3-TTS stays on macOS. The API reaches it through `host.docker.internal` with a generated token and continues returning WAV chunks ephemerally. Do not publish port 4321 through a router or tunnel.
+
 ### Private access from an iPhone with Tailscale
 
 Keep Narad bound to loopback and let [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve) provide the private HTTPS endpoint. Install and sign in to Tailscale on the Mac and iPhone, then choose the exact HTTPS name for this Mac and start Narad with it:

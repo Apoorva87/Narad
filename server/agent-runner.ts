@@ -9,7 +9,8 @@ export type AgentRunner = {run:(request:AgentRequest,signal:AbortSignal,onSessio
 export function executeProcess(options:{command:string;args:string[];cwd:string;input:string;signal:AbortSignal;timeoutMs:number;maxBytes?:number;onSession?:(pid:number|null)=>void;onOutput?:(text:string)=>void}):Promise<{stdout:string;stderr:string}> {
   return new Promise((resolve,reject)=>{
     if(options.signal.aborted) {reject(new Error('Preparation cancelled.'));return;}
-    const host=fork(fileURLToPath(new URL('./cli-host.mjs',import.meta.url)),[],{cwd:options.cwd,detached:true,silent:true,execArgv:[]});
+    const environment={...process.env};delete environment.NARAD_AGENT_TOKEN;delete environment.NARAD_TTS_TOKEN;
+    const host=fork(fileURLToPath(new URL('./cli-host.mjs',import.meta.url)),[],{cwd:options.cwd,detached:true,silent:true,execArgv:[],env:environment});
     let stdout='';let stderr='';let bytes=0;let failure:Error|undefined;let exitCode:number|undefined;let escalation:ReturnType<typeof setTimeout>|undefined;
     const kill=(signal:NodeJS.Signals)=>{if(host.pid)try{process.kill(-host.pid,signal)}catch{/* already closed */}};
     const stop=(reason:string)=>{if(failure)return;failure=new Error(reason);kill('SIGTERM');escalation=setTimeout(()=>kill('SIGKILL'),1500);escalation.unref();};
