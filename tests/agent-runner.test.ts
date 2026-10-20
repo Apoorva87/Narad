@@ -3,6 +3,17 @@ import { executeProcess, providerArgs } from '../server/agent-runner';
 it('passes prompt text through stdin without shell evaluation and captures the result',async()=>{
  const r=await executeProcess({command:process.execPath,args:['-e',"let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(s))"],cwd:process.cwd(),input:'$(touch unwanted) `hello`',signal:new AbortController().signal,timeoutMs:3000});expect(r.stdout).toBe('$(touch unwanted) `hello`');
 });
+it('does not pass Narad service bearer tokens to provider processes',async()=>{
+ const beforeAgent=process.env.NARAD_AGENT_TOKEN,beforeTts=process.env.NARAD_TTS_TOKEN;
+ process.env.NARAD_AGENT_TOKEN='agent-secret';process.env.NARAD_TTS_TOKEN='tts-secret';
+ try {
+  const r=await executeProcess({command:process.execPath,args:['-e',"process.stdout.write(String(process.env.NARAD_AGENT_TOKEN)+':'+String(process.env.NARAD_TTS_TOKEN))"],cwd:process.cwd(),input:'',signal:new AbortController().signal,timeoutMs:3000});
+  expect(r.stdout).toBe('undefined:undefined');
+ } finally {
+  if(beforeAgent===undefined)delete process.env.NARAD_AGENT_TOKEN;else process.env.NARAD_AGENT_TOKEN=beforeAgent;
+  if(beforeTts===undefined)delete process.env.NARAD_TTS_TOKEN;else process.env.NARAD_TTS_TOKEN=beforeTts;
+ }
+});
 it('stops an owned process and rejects late results',async()=>{
  const controller=new AbortController();let pid=0;
  const p=executeProcess({command:process.execPath,args:['-e',"setInterval(()=>{},1000)"],cwd:process.cwd(),input:'',signal:controller.signal,timeoutMs:3000,onSession:n=>{if(n){pid=n;controller.abort()}}});
