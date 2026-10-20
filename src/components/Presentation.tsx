@@ -71,7 +71,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
       </div>}
     </div>
     {askIndex >= 0 && <aside className="presentation-ask" aria-label="Tutor conversation">
-      <div className="presentation-ask-head"><strong>Ask tutor</strong>{askIndex !== activeIndex && <button className="text-link" onClick={onAskCurrent}>Back to current passage</button>}</div>
+      <div className="presentation-ask-head"><strong>Ask tutor</strong><span className="presentation-ask-actions">{askIndex !== activeIndex && <button className="text-link" onClick={onAskCurrent}>Back to current passage</button>}<button className="presentation-ask-close" onClick={onToggleAsk} aria-label="Close tutor panel" title="Close (A)"><X size={16} /></button></span></div>
       <blockquote>{blocks[askIndex].block.markdown.slice(0, 140)}{blocks[askIndex].block.markdown.length > 140 ? '…' : ''}</blockquote>
       {renderThread(blocks[askIndex].block.id)}
     </aside>}

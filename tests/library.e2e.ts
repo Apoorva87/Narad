@@ -290,3 +290,41 @@ test('presentation mode can ask the tutor about the passage it was opened on', a
   await page.keyboard.press('a');
   await expect(stage.locator('.presentation-ask')).toHaveCount(0);
 });
+
+test('on a phone the tutor panel leaves the presentation controls usable and closes with its own button', async ({ page, request }) => {
+  const id = await copyOf(request, 'gradient-descent', 'present-ask-phone');
+  await page.route('**/api/speech', route => route.fulfill({ json: { state: 'ready', model: 'Fixture' } }));
+  await page.goto('/#lesson/' + id);
+  await page.getByRole('tab', { name: 'Detailed walkthrough' }).click();
+  await page.getByRole('button', { name: 'Set reading position at g-step', exact: true }).click();
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stage = page.getByRole('dialog', { name: /^Presenting/ });
+  await stage.getByRole('button', { name: 'Ask tutor' }).click();
+  await expect(stage.locator('.presentation-ask')).toBeVisible();
+  for (const name of ['Play narration', 'Next passage', 'Previous passage']) {
+    const button = stage.getByRole('button', { name, exact: true });
+    const covered = await button.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return !hit || !element.contains(hit); });
+    expect(covered, name).toBe(false);
+  }
+  const count = await stage.locator('.presentation-count').textContent();
+  await stage.getByRole('button', { name: 'Next passage', exact: true }).click();
+  await expect(stage.locator('.presentation-count')).not.toHaveText(count!);
+  await stage.getByRole('button', { name: 'Close tutor panel' }).click();
+  await expect(stage.locator('.presentation-ask')).toHaveCount(0);
+});
+
+test('a tutor draft in the presentation panel stays with its passage', async ({ page, request }) => {
+  const id = await copyOf(request, 'gradient-descent', 'present-ask-draft');
+  await page.route('**/api/speech', route => route.fulfill({ json: { state: 'ready', model: 'Fixture' } }));
+  await page.goto('/#lesson/' + id);
+  await page.getByRole('tab', { name: 'Detailed walkthrough' }).click();
+  await page.getByRole('button', { name: 'Set reading position at g-step', exact: true }).click();
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  const stage = page.getByRole('dialog', { name: /^Presenting/ });
+  await stage.getByRole('button', { name: 'Ask tutor' }).click();
+  await stage.locator('.presentation-ask').getByLabel('Question for the tutor').fill('A draft about the first passage');
+  await stage.getByRole('button', { name: 'Next passage', exact: true }).click();
+  await stage.getByRole('button', { name: 'Back to current passage' }).click();
+  await expect(stage.locator('.presentation-ask').getByLabel('Question for the tutor')).toHaveValue('');
+});

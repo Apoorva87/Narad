@@ -93,6 +93,14 @@ describe('source preservation', () => {
     expect(source.markdown).toContain('x = 42');
     expect(source.warnings).toEqual([]);
   });
+  it('links a Not captured note to the original page when its http(s) address is known', () => {
+    const markdown = 'Before.\n\n![Interactive figure](source-note-0)\n\nAfter.';
+    const linked = renderToStaticMarkup(createElement(Markdown, { children: markdown, sourceUrl: 'https://example.com/page' } as any));
+    expect(linked).toContain('Not captured: Interactive figure.');
+    expect(linked).toMatch(/<a href="https:\/\/example\.com\/page"[^>]*>Open the original ↗<\/a>/);
+    for (const sourceUrl of [undefined, 'javascript:alert(1)'])
+      expect(renderToStaticMarkup(createElement(Markdown, { children: markdown, sourceUrl } as any))).not.toContain('Open the original');
+  });
   it('keeps currency amounts and linked footnote markers as plain text', async () => {
     const html = '<article><p>It costs $5 to $10 per hour.<sup class="reference"><a href="#cite-1">[1]</a></sup></p></article>';
     const { source } = await captureArticle('https://example.com/', async url => ({ bytes: Buffer.from(html), type: 'text/html', url }));

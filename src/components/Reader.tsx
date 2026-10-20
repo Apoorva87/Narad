@@ -103,7 +103,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
     narration.updatePreferences({ ...narration.preferences, rate });
   }
   const [askAt, setAskAt] = useState<string | null>(null);
-  const replyThread = (sectionId: string, blockId: string, expanded: boolean, onToggle: () => void) => <ReplyThread lesson={lesson} mode={mode} sectionId={sectionId} blockId={blockId} thread={tutor.threadFor(blockId)} providers={tutor.state.providers} expanded={expanded} busy={!!tutor.state.activeTurnId} playback={tutorPlayback.state}
+  const replyThread = (sectionId: string, blockId: string, expanded: boolean, onToggle: () => void) => <ReplyThread key={blockId} lesson={lesson} mode={mode} sectionId={sectionId} blockId={blockId} thread={tutor.threadFor(blockId)} providers={tutor.state.providers} expanded={expanded} busy={!!tutor.state.activeTurnId} playback={tutorPlayback.state}
     onToggle={onToggle} onBegin={()=>{const wasPlaying=['playing','loading'].includes(narration.state.status);narration.pause();tutorPlayback.stop();return wasPlaying}}
     onAsk={tutor.ask} onStop={tutor.stop} onRemove={tutor.remove} onPlay={(turn,part)=>{narration.pause();void tutorPlayback.play(turn,narration.preferences,part)}} onContinue={()=>{tutorPlayback.stop();narration.resume()}} />;
   useEffect(() => { if (!presenting) setAskAt(null); }, [presenting]);
