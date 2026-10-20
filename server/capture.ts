@@ -61,12 +61,23 @@ export async function captureArticle(url: string, download: Download = downloadP
   if (root.find('video, audio, iframe').filter((_i, node) => node.tagName !== 'iframe' || isVideoFrame($(node).attr('src'))).length) source.warnings.push({ kind: 'info', message: 'This page includes video or audio that a static capture cannot keep. Check the original: ' + response.url });
   if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push({ kind: 'info', message: 'A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.' });
   const blobs: AssetBlob[] = []; let downloadedBytes = response.bytes.length;
-  const visuals = root.find('img, svg').filter((_i, node) => $(node).parents('svg').length === 0).toArray();
-  // Interactive elements cannot be kept; leave a marker at their position and say so.
-  root.find('canvas, iframe, math').filter((_i, node) => node.tagName !== 'iframe' || !isVideoFrame($(node).attr('src'))).each((n, node) => {
-    $(node).replaceWith($('<p>').append($('<img>').attr('src', 'source-note-' + n).attr('alt', 'Interactive figure')));
+  // Interactive elements cannot be kept; leave a marker and say so. Done before collecting visuals so images inside them are not registered.
+  let notes = 0;
+  const marker = () => $('<p>').append($('<img>').attr('src', 'source-note-' + notes++).attr('alt', 'Interactive figure'));
+  root.find('canvas, iframe, math').filter((_i, node) => node.tagName !== 'iframe' || !isVideoFrame($(node).attr('src'))).each((_i, node) => {
+    const element = $(node);
+    if (node.tagName === 'math') {
+      const tex = element.find('annotation[encoding="application/x-tex"]').first().text().trim();
+      if (tex) { element.replaceWith($('<span>').attr('data-narad-math', tex).attr('data-display', element.attr('display') === 'block' ? 'block' : 'inline').text(tex)); return; }
+    }
+    // Inline MathML must not split its sentence: put the marker after the enclosing block (inside list items and cells).
+    const block = node.tagName === 'math' ? element.parent().closest('p, li, td, th, figure, div') : $();
+    const inside = block.length && ['li', 'td', 'th'].includes(block[0].tagName);
+    if (block.length && root.find(block).length) { if (inside) block.append(marker()); else block.after(marker()); element.remove(); }
+    else element.replaceWith(marker());
     source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + response.url });
   });
+  const visuals = root.find('img, svg').filter((_i, node) => $(node).parents('svg').length === 0 && !$(node).attr('src')?.startsWith('source-note-')).toArray();
   // Keep source order while limiting network concurrency. No background worker infrastructure needed.
   const tasks = visuals.map((node, index) => {
     const element = $(node); const isSvg = node.tagName === 'svg';

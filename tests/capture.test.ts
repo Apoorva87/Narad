@@ -37,6 +37,24 @@ describe('source preservation', () => {
     expect(captured.source.warnings.some(w => w.message.includes('https://example.com/p'))).toBe(true);
     expect(isBlocking(captured.source)).toBe(false);
   });
+  it('converts TeX-annotated MathML inline without splitting the sentence', async () => {
+    const captured = await captureArticle('https://example.com/p', async url => ({ bytes: Buffer.from('<article><p>Let <math><semantics><mi>x</mi><annotation encoding="application/x-tex">x^2</annotation></semantics></math> be small.</p></article>'), type: 'text/html', url }));
+    expect(captured.source.markdown.trim()).toMatch(/^Let \$x\^2\$ be small\.$/);
+    expect(captured.source.markdown).not.toContain('source-note');
+    expect(captured.source.warnings).toEqual([]);
+  });
+  it('places a note after the paragraph for MathML without TeX', async () => {
+    const captured = await captureArticle('https://example.com/p', async url => ({ bytes: Buffer.from('<article><p>Let <math><mi>x</mi></math> be small.</p><p>Next.</p></article>'), type: 'text/html', url }));
+    expect(captured.source.markdown.trim().split(/\n\s*\n/)).toEqual(['Let be small.', '![Interactive figure](source-note-0)', 'Next.']);
+    expect(captured.source.warnings).toHaveLength(1);
+  });
+  it('does not register or download images inside replaced elements', async () => {
+    const requested: string[] = [];
+    const captured = await captureArticle('https://example.com/p', async url => { requested.push(url); return { bytes: Buffer.from('<article><p>A</p><iframe src="/embed"><img src="fallback.png"></iframe><canvas><img src="c.png"></canvas></article>'), type: 'text/html', url }; });
+    expect(captured.source.assets).toEqual([]);
+    expect(requested).toEqual(['https://example.com/p']);
+    expect(captured.source.warnings.every(w => w.kind === 'info')).toBe(true);
+  });
   it('keeps failed visuals blocking', async () => {
     const captured = await captureArticle('https://example.com/', async url => {
       if (url.endsWith('.png')) throw new Error('Image unavailable');
