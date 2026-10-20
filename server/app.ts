@@ -115,17 +115,19 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   const deleteBundle = async (id: string) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before deleting.', 409);
     id = bundleSlug(id);
-    await preparation?.dequeue(id);
     if (preparation?.busy(id)) throw new StoreError('Stop preparation before deleting these sources.', 409);
-    const jobs = store.deleteBundle(id);
+    // A queued item leaves the queue only for the delete itself; it goes back if the delete fails.
+    const remove = () => store.deleteBundle(id);
+    const jobs = preparation ? await preparation.whileDequeued(id, remove) : remove();
     await preparation?.forget(jobs);
   };
   app.patch('/api/source-bundles/:id', async (req, res) => {
     const slug = bundleSlug(req.params.id);
-    // A queued item leaves the queue first; a running one must be stopped.
-    await preparation?.dequeue(slug);
+    const { title } = renameInput.parse(req.body);
+    // A running item must be stopped; a queued one leaves the queue for the rename and returns to it if the rename fails.
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
-    const bundle = store.renameBundle(slug, renameInput.parse(req.body).title);
+    const rename = () => store.renameBundle(slug, title);
+    const bundle = preparation ? await preparation.whileDequeued(slug, rename) : rename();
     // The lesson, if any, shares this folder; its tutor threads follow the new slug.
     if (bundle.id !== slug) options.tutor?.moveLesson(slug, bundle.id);
     res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
@@ -187,9 +189,10 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   });
   app.patch('/api/lessons/:id', async (req, res) => {
     const slug = lessonSlug(req.params.id);
-    await preparation?.dequeue(slug);
+    const { title } = renameInput.parse(req.body);
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
-    const lesson = store.renameLesson(slug, renameInput.parse(req.body).title);
+    const rename = () => store.renameLesson(slug, title);
+    const lesson = preparation ? await preparation.whileDequeued(slug, rename) : rename();
     if (lesson.id !== slug) options.tutor?.moveLesson(slug, lesson.id);
     res.json(lesson);
   });
@@ -198,7 +201,6 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const slug = store.resolveId(req.params.id);
     if (!slug || !store.list().some(item => item.id === slug)) throw new StoreError('Analysis not found.', 404);
     const bundleId = req.query.sources === 'true' && store.listBundles().some(item => item.id === slug) ? slug : undefined;
-    if (bundleId) await preparation?.dequeue(bundleId);
     if (bundleId && (capturing || preparation?.busy(bundleId))) throw new StoreError('Stop preparation before deleting these sources.', 409);
     store.deleteLesson(slug);
     options.tutor?.deleteLesson(slug);

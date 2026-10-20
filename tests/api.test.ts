@@ -217,7 +217,7 @@ it('refuses to publish a second lesson into an occupied collection folder', asyn
 });
 it('moves reading positions and tutor threads with either rename, and refuses renames while preparing', async () => {
   let busy = false;
-  const preparation = { busy: () => busy, dequeue: async () => false } as unknown as PreparationService;
+  const preparation = { busy: () => busy, dequeue: async () => false, whileDequeued: async (_slug: string, action: () => unknown) => action() } as unknown as PreparationService;
   const turns = new TutorStore(':memory:');
   const tutor = new TutorService(store = new LessonStore(':memory:'), turns, store.libraryRoot, { available: () => [], run: async () => ({}) });
   server = createApp(store, preparation, undefined, { tutor }).listen(0, '127.0.0.1');
@@ -281,6 +281,14 @@ it('queues a preparation with 202 instead of refusing while another lesson is pr
     const second = await prepare('second'); expect(second.status).toBe(202); expect(await second.json()).toMatchObject({ status: 'queued', queuePosition: 1, queueLength: 1 });
     const state = await (await fetch(base + '/api/preparation')).json();
     expect(state.jobs.find((job: { slug: string }) => job.slug === 'second').status).toBe('queued');
+    for (const path of ['/api/source-bundles/second', '/api/lessons/second']) {
+      const invalid = await fetch(base + path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: '   ' }) });
+      expect([400, 404]).toContain(invalid.status);
+      expect(preparation.state().jobs.find(job => job.slug === 'second')).toMatchObject({ status: 'queued', queuePosition: 1 });
+    }
+    const missing = await fetch(base + '/api/lessons/second?sources=true', { method: 'DELETE' });
+    expect(missing.status).toBe(404);
+    expect(preparation.state().jobs.find(job => job.slug === 'second')?.status).toBe('queued');
     const renamed = await fetch(base + '/api/source-bundles/second', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Renamed' }) });
     expect(renamed.status).toBe(200);
     expect(preparation.state().jobs.find(job => job.slug === 'renamed')?.status).toBe('stopped');

@@ -61,8 +61,12 @@ switch (command) {
   }
   case 'prepare': {
     if (!target || !['codex', 'claude'].includes(provider)) fail('Usage: prepare <slug> [codex|claude] [--level <level>] [--restart]');
+    // A start on an item that is already running or queued returns its current job; say so rather than "started".
+    const before: Job | undefined = (await call('/api/preparation')).jobs.find((job: Job) => job.slug === target && ['running', 'stopping', 'queued'].includes(job.status));
     const job = await call('/api/source-bundles/' + encodeURIComponent(target) + '/prepare', { method: 'POST', body: { provider, ...(level ? { familiarity: level } : {}), action: flag('--restart') ? 'restart' : 'continue' } });
-    const headline = job.status === 'queued' ? `Queued (position ${job.queuePosition ?? '?'}). It starts automatically when a slot frees up.`
+    const already = before && job.status === before.status;
+    const headline = already ? (job.status === 'queued' ? `Already queued (position ${job.queuePosition ?? '?'}).` : 'Already running.')
+      : job.status === 'queued' ? `Queued (position ${job.queuePosition ?? '?'}). It starts automatically when a slot frees up.`
       : job.status === 'running' || job.status === 'stopping' ? `Preparation ${flag('--restart') ? 'restarted' : 'started (finished sections are reused)'}.` : `Preparation is ${job.status}.`;
     console.log(flag('--json') ? JSON.stringify(job, null, 2) : headline + '\n' + describe(job, false));
     break;

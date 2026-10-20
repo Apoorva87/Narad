@@ -100,7 +100,9 @@ export class PreparationService {
     if (!this.runner.available().some(p => p.id === provider && p.available)) throw new StoreError('This agent is not available. Install it and sign in from a terminal, then restart Narad if PATH changed.', 400);
     const found = this.store.getBundle(slug); if (!found) throw new StoreError('Source collection not found.', 404);
     buildTeachingPlan(found);
-    if (this.active.size < this.limit()) return this.launch({ slug: found.id, provider, familiarity, action });
+    // Waiting items go first: fill any free slot from the queue, then start this one only if a slot is still free and nobody waits.
+    this.pump();
+    if (this.active.size < this.limit() && !this.queue.length) return this.launch({ slug: found.id, provider, familiarity, action });
     return this.enqueue({ slug: found.id, provider, familiarity, action }, found.familiarity ?? 'foundational');
   }
   async stop(id: string): Promise<PreparationJob> {
@@ -132,6 +134,29 @@ export class PreparationService {
     });
     return true;
   }
+  /**
+   * Runs `action` (a rename or delete) with the item out of the queue. When the action throws, the item goes back to its
+   * place in the queue with its queued progress restored, so a failed rename or delete never loses a waiting lesson.
+   */
+  async whileDequeued<T>(id: string, action: () => T | Promise<T>): Promise<T> {
+    const slug = this.store.resolveId(id) ?? id;
+    const index = this.queued(slug);
+    if (index < 0) return action();
+    const entry = this.queue[index];
+    await this.fs.withLock(slug, async () => undefined); // let the queued write land before taking the snapshot
+    const before = this.read(slug);
+    const saved = before && { status: before.status, queuedAt: before.queuedAt, request: before.request, beforeQueue: before.beforeQueue, error: before.error };
+    if (!await this.dequeue(slug)) return action(); // started or removed while waiting for the lock
+    try { return await action(); }
+    catch (error) {
+      if (!this.closing && this.queued(slug) < 0 && !this.active.has(slug)) {
+        this.queue.splice(Math.min(index, this.queue.length), 0, entry);
+        if (saved) await this.update(slug, p => { for (const [key, value] of Object.entries(saved)) if (value === undefined) delete (p as Record<string, unknown>)[key]; else (p as Record<string, unknown>)[key] = value; });
+        this.pump();
+      }
+      throw error;
+    }
+  }
   /** Lets queued items use slots freed by a raised `lessonsAtOnce`. Lowering it never stops a running lesson. */
   settingsChanged() { this.pump(); }
   /** True while this collection is being prepared (not merely queued), matching old IDs and renamed slugs alike. */
@@ -150,7 +175,11 @@ export class PreparationService {
   private limit() { return this.store.getSettings().preparation.lessonsAtOnce; }
   private queued(slug: string) { return this.queue.findIndex(entry => entry.slug === slug); }
   /** Starts the oldest queued items while slots are free. A queued item that can no longer start is marked failed and skipped. */
+  /** Never throws: it runs from a finished run's `finally`, where an exception would become an unhandled rejection. */
   private pump() {
+    try { this.fill(); } catch (error) { console.error('Could not start the next queued preparation:', error); }
+  }
+  private fill() {
     while (!this.closing && this.queue.length && this.active.size < this.limit()) {
       const next = this.queue.shift()!;
       try {

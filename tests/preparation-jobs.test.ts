@@ -335,3 +335,33 @@ it('stops every active run on shutdown and waits for them',async()=>{
  expect(t.progress('time').status).toBe('interrupted');expect(t.progress('space').status).toBe('interrupted');
  expect([...g.started].sort()).toEqual(['space','time']);expect(t.service.state().sessions).toEqual([]);
 });
+it('survives a settings read that throws while starting the next queued item, and later starts still work',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
+ const unhandled:unknown[]=[];const onUnhandled=(reason:unknown)=>unhandled.push(reason);process.on('unhandledRejection',onUnhandled);
+ try{
+  t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');
+  await expect.poll(()=>g.held('time')).toBe(true);
+  const getSettings=t.store.getSettings.bind(t.store);let broken=true;
+  t.store.getSettings=(()=>{if(broken)throw new Error('settings unreadable');return getSettings()}) as typeof t.store.getSettings;
+  g.release('time');await expect.poll(()=>t.job('time')?.status).toBe('completed');
+  await new Promise(r=>setTimeout(r,50));expect(unhandled).toEqual([]);expect(t.job('space')?.status).toBe('queued');
+  broken=false;t.service.settingsChanged();await expect.poll(()=>g.held('space')).toBe(true);g.release('space');
+  await expect.poll(()=>t.job('space')?.status).toBe('completed');expect(unhandled).toEqual([]);
+ }finally{process.off('unhandledRejection',onUnhandled)}
+});
+it('keeps first in, first out when a slot frees without a queue change: a new start goes behind the waiting item',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
+ t.service.start('time','codex');expect(t.service.start('space','codex').status).toBe('queued');await expect.poll(()=>g.held('time')).toBe(true);
+ const settings=t.store.getSettings();(settings.preparation as Record<string,unknown>).lessonsAtOnce=2;t.store.saveSettings(settings);
+ expect(t.service.start('light','codex')).toMatchObject({status:'queued',queuePosition:1});
+ await expect.poll(()=>g.held('space')).toBe(true);expect(g.started).toEqual(['time','space']);
+ g.release('time');await expect.poll(()=>g.held('light')).toBe(true);expect(g.started).toEqual(['time','space','light']);
+ g.release('space');g.release('light');await expect.poll(()=>t.job('light')?.status).toBe('completed');
+});
+it('puts an item back in its queue place when the action run while it is out of the queue fails',async()=>{
+ const g=gate();const t=await setupMany(['Time','Space','Light'],1,g.run);
+ t.service.start('time','codex');t.service.start('space','codex');t.service.start('light','codex');
+ await expect(t.service.whileDequeued('space',()=>{throw new Error('rename failed')})).rejects.toThrow('rename failed');
+ expect(t.job('space')).toMatchObject({status:'queued',queuePosition:1,queueLength:2});expect(t.progress('space').status).toBe('queued');
+ expect(await t.service.whileDequeued('light',()=>'ok')).toBe('ok');expect(t.job('light')?.status).toBe('stopped');
+});

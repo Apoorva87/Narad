@@ -70,6 +70,8 @@ describe('scripts/narad.ts', () => {
     try {
       expect((await run(['prepare', 'first', 'codex'], api)).stdout).toContain('Preparation started');
       expect((await run(['prepare', 'second', 'codex'], api)).stdout).toContain('Queued (position 1)');
+      expect((await run(['prepare', 'first', 'codex'], api)).stdout).toContain('Already running.');
+      expect((await run(['prepare', 'second', 'codex'], api)).stdout).toContain('Already queued (position 1).');
       const status = (await run(['status'], api)).stdout;
       expect(status).toContain('1 preparing · 1 queued');
       expect(status).toContain('queued (position 1 of 1)');
