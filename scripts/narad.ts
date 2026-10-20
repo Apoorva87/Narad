@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 /** Command-line access to a running Narad server, used by the narad-prepare agent skills. */
 const usage = `Usage: node --import tsx scripts/narad.ts <command>
   add <input.json> [--level foundational|some-background|advanced]   Save sources; prints the item slug
-  prepare <slug> [codex|claude] [--level <level>] [--restart]           Start or continue preparing a lesson
+  prepare <slug> [codex|claude] [--level <level>] [--restart]           Start or continue preparing a lesson (queues if all slots are busy)
   status [<slug>]                                                      Preparation runs (all, or one item)
-  stop <slug>                                                          Stop that item's running preparation
+  stop <slug>                                                          Stop that item's preparation, or remove it from the queue
   link <slug>                                                          Reader address for a prepared lesson
 Add --json to any command for the raw API response.
 Environment: NARAD_API_URL (default http://127.0.0.1:4318), NARAD_WEB_URL (default: same as the API).`;
@@ -32,10 +32,11 @@ async function call(path: string, init?: { method?: string; body?: unknown }) {
   return result;
 }
 const tokens = (n?: number) => n === undefined ? '' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
-type Job = { slug: string; title: string; status: string; stage: string; completed: number; total: number; provider: string; folder: string; lessonId?: string; error?: string;
+type Job = { slug: string; title: string; status: string; queuePosition?: number; queueLength?: number; stage: string; completed: number; total: number; provider: string; folder: string; lessonId?: string; error?: string;
   sections?: { task: string; title: string; state: string; error?: string }[]; usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number } };
 function describe(job: Job, detailed: boolean) {
-  const lines = [`${job.title}  [${job.slug}]`, `  ${job.status} · ${job.completed}/${job.total} sections · ${job.provider} · ${job.stage}`];
+  const state = job.status === 'queued' && job.queuePosition ? `queued (position ${job.queuePosition} of ${job.queueLength ?? job.queuePosition})` : job.status;
+  const lines = [`${job.title}  [${job.slug}]`, `  ${state} · ${job.completed}/${job.total} sections · ${job.provider} · ${job.stage}`];
   if (job.usage) lines.push(`  tokens: ${tokens(job.usage.inputTokens)} in · ${tokens(job.usage.outputTokens)} out${job.usage.cachedTokens ? ` (cached ${tokens(job.usage.cachedTokens)})` : ''}${job.usage.costUsd !== undefined ? ` · $${job.usage.costUsd.toFixed(2)}` : ''}`);
   if (job.error) lines.push('  error: ' + job.error);
   if (job.lessonId) lines.push('  lesson: ' + web + '/#lesson/' + job.slug);
@@ -60,8 +61,14 @@ switch (command) {
   }
   case 'prepare': {
     if (!target || !['codex', 'claude'].includes(provider)) fail('Usage: prepare <slug> [codex|claude] [--level <level>] [--restart]');
+    // A start on an item that is already running or queued returns its current job; say so rather than "started".
+    const before: Job | undefined = (await call('/api/preparation')).jobs.find((job: Job) => job.slug === target && ['running', 'stopping', 'queued'].includes(job.status));
     const job = await call('/api/source-bundles/' + encodeURIComponent(target) + '/prepare', { method: 'POST', body: { provider, ...(level ? { familiarity: level } : {}), action: flag('--restart') ? 'restart' : 'continue' } });
-    console.log(flag('--json') ? JSON.stringify(job, null, 2) : `Preparation ${flag('--restart') ? 'restarted' : 'started (finished sections are reused)'}.\n` + describe(job, false));
+    const already = before && job.status === before.status;
+    const headline = already ? (job.status === 'queued' ? `Already queued (position ${job.queuePosition ?? '?'}).` : 'Already running.')
+      : job.status === 'queued' ? `Queued (position ${job.queuePosition ?? '?'}). It starts automatically when a slot frees up.`
+      : job.status === 'running' || job.status === 'stopping' ? `Preparation ${flag('--restart') ? 'restarted' : 'started (finished sections are reused)'}.` : `Preparation is ${job.status}.`;
+    console.log(flag('--json') ? JSON.stringify(job, null, 2) : headline + '\n' + describe(job, false));
     break;
   }
   case 'status': {
@@ -69,13 +76,15 @@ switch (command) {
     const jobs: Job[] = target ? state.jobs.filter((job: Job) => job.slug === target) : state.jobs;
     if (flag('--json')) { console.log(JSON.stringify(target ? jobs : state, null, 2)); break; }
     if (!jobs.length) { console.log(target ? 'No preparation runs for ' + target : 'No preparation runs yet.'); break; }
-    console.log(`${state.sessions.length} live agent session(s).\n` + jobs.map(job => describe(job, !!target)).join('\n\n'));
+    const running = state.jobs.filter((job: Job) => job.status === 'running' || job.status === 'stopping').length, queued = state.jobs.filter((job: Job) => job.status === 'queued').length;
+    console.log(`${running} preparing · ${queued} queued · ${state.sessions.length} live agent session(s).\n` + jobs.map(job => describe(job, !!target)).join('\n\n'));
     break;
   }
   case 'stop': {
     if (!target) fail('Usage: stop <slug>');
     const job = await call('/api/preparation/' + encodeURIComponent(target) + '/stop', { method: 'POST' });
-    console.log(flag('--json') ? JSON.stringify(job, null, 2) : 'Stopping. Finished sections are kept.\n' + describe(job, false));
+    const headline = job.status === 'stopping' ? 'Stopping. Finished sections are kept.' : job.status === 'stopped' || job.status === 'completed' ? 'Not running; removed from the queue if it was waiting. Finished sections are kept.' : 'Preparation is ' + job.status + '.';
+    console.log(flag('--json') ? JSON.stringify(job, null, 2) : headline + '\n' + describe(job, false));
     break;
   }
   case 'link': {

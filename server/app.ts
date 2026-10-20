@@ -35,7 +35,10 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const current = store.getSettings() as unknown as Record<string, Record<string, unknown>>;
     const patch = z.record(z.string(), z.record(z.string(), z.unknown())).parse(req.body);
     const merged = Object.fromEntries(Object.entries(current).map(([section, values]) => [section, { ...values, ...(patch[section] ?? {}) }]));
-    res.json({ settings: store.saveSettings(settingsSchema.parse(merged) as Settings), defaults: defaultSettings });
+    const settings = store.saveSettings(settingsSchema.parse(merged) as Settings);
+    // A raised "Lessons at once" starts waiting lessons right away.
+    preparation?.settingsChanged();
+    res.json({ settings, defaults: defaultSettings });
   });
   const narration = () => { if (!speech) throw new StoreError('Local narration is not enabled in this server.',503); return speech; };
   app.get('/api/speech', (_req,res)=>res.json(narration().status()));
@@ -82,7 +85,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const { provider, familiarity, action } = prepareInput.parse(req.body);
     res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity, action));
   });
-  app.post('/api/preparation/:id/stop', (req, res) => res.json(jobs().stop(req.params.id)));
+  app.post('/api/preparation/:id/stop', async (req, res) => res.json(await jobs().stop(req.params.id)));
   let capturing = false;
   app.get('/api/source-bundles', (_req, res) => res.json(store.listBundles()));
   app.post('/api/source-bundles', async (req, res) => {
@@ -113,13 +116,18 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     if (capturing) throw new StoreError('Wait for source capture to finish before deleting.', 409);
     id = bundleSlug(id);
     if (preparation?.busy(id)) throw new StoreError('Stop preparation before deleting these sources.', 409);
-    const jobs = store.deleteBundle(id);
+    // A queued item leaves the queue only for the delete itself; it goes back if the delete fails.
+    const remove = () => store.deleteBundle(id);
+    const jobs = preparation ? await preparation.whileDequeued(id, remove) : remove();
     await preparation?.forget(jobs);
   };
-  app.patch('/api/source-bundles/:id', (req, res) => {
+  app.patch('/api/source-bundles/:id', async (req, res) => {
     const slug = bundleSlug(req.params.id);
+    const { title } = renameInput.parse(req.body);
+    // A running item must be stopped; a queued one leaves the queue for the rename and returns to it if the rename fails.
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
-    const bundle = store.renameBundle(slug, renameInput.parse(req.body).title);
+    const rename = () => store.renameBundle(slug, title);
+    const bundle = preparation ? await preparation.whileDequeued(slug, rename) : rename();
     // The lesson, if any, shares this folder; its tutor threads follow the new slug.
     if (bundle.id !== slug) options.tutor?.moveLesson(slug, bundle.id);
     res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
@@ -179,10 +187,12 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     // The source collection link is local to this library; an import elsewhere would reject it.
     res.json(parseLesson({ ...lesson, sourceBundleId: undefined }));
   });
-  app.patch('/api/lessons/:id', (req, res) => {
+  app.patch('/api/lessons/:id', async (req, res) => {
     const slug = lessonSlug(req.params.id);
+    const { title } = renameInput.parse(req.body);
     if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
-    const lesson = store.renameLesson(slug, renameInput.parse(req.body).title);
+    const rename = () => store.renameLesson(slug, title);
+    const lesson = preparation ? await preparation.whileDequeued(slug, rename) : rename();
     if (lesson.id !== slug) options.tutor?.moveLesson(slug, lesson.id);
     res.json(lesson);
   });

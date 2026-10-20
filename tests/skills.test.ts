@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import type { Server } from 'node:http';
 import { LessonStore } from '../server/store';
 import { createApp } from '../server/app';
+import { PreparationService } from '../server/preparation';
 
 const repo = resolve('.');
 const dirs: string[] = [];
@@ -59,6 +60,25 @@ describe('scripts/narad.ts', () => {
   it('explains how to start Narad when the server is unreachable', async () => {
     await expect(run(['status'], 'http://127.0.0.1:9')).rejects.toMatchObject({ stderr: expect.stringContaining('./start.sh start') });
   });
+  it('reports a queued preparation with its position, lists it in status, and dequeues it with stop', async () => {
+    store = new LessonStore(':memory:');
+    for (const title of ['First', 'Second']) store.saveBundle({ id: title.toLowerCase(), title, text: 'Explain', createdAt: new Date().toISOString(), status: 'captured', sources: [{ id: 'a', title, kind: 'article', markdown: '# T\n\nA delay of 42 ms.', assets: [], warnings: [], inventory: { images: 0, inlineSvg: 0, tables: 0, savedVisuals: 0 } }] }, []);
+    const preparation = new PreparationService(store, temp(), { run: (_request, signal) => new Promise((_resolve, reject) => { if (signal.aborted) reject(signal.reason); else signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }), available: () => [{ id: 'codex', available: true }] });
+    server = createApp(store, preparation).listen(0, '127.0.0.1');
+    await new Promise<void>(done => server!.once('listening', () => done()));
+    const api = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+    try {
+      expect((await run(['prepare', 'first', 'codex'], api)).stdout).toContain('Preparation started');
+      expect((await run(['prepare', 'second', 'codex'], api)).stdout).toContain('Queued (position 1)');
+      expect((await run(['prepare', 'first', 'codex'], api)).stdout).toContain('Already running.');
+      expect((await run(['prepare', 'second', 'codex'], api)).stdout).toContain('Already queued (position 1).');
+      const status = (await run(['status'], api)).stdout;
+      expect(status).toContain('1 preparing · 1 queued');
+      expect(status).toContain('queued (position 1 of 1)');
+      await run(['stop', 'second'], api);
+      expect(preparation.state().jobs.find(job => job.slug === 'second')?.status).toBe('stopped');
+    } finally { await preparation.shutdown(); }
+  }, 20_000);
   it('rejects an unknown level before calling the server', async () => {
     await expect(run(['prepare', 'x', 'codex', '--level', 'expert'], 'http://127.0.0.1:9')).rejects.toMatchObject({ stderr: expect.stringContaining('Level must be one of') });
   });

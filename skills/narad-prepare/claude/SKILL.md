@@ -19,14 +19,14 @@ The API defaults to http://127.0.0.1:4318 (`NARAD_API_URL` overrides it). If `no
    It prints the item slug and capture warnings. `note:` warnings (interactive figures, merged tables) don't block preparation — they become "Not captured" notes in the lesson. `BLOCKING:` warnings mean article text or an image failed to save; tell the user and don't prepare until the source is retried in the app.
 3. Start preparation with the agent the user prefers; if they don't say, use `claude`:
    `node --import tsx scripts/narad.ts prepare <slug> claude`
-   Narad prepares one item at a time. If another preparation is running, tell the user instead of stopping it.
+   If every preparation slot is busy (Settings → Preparation → Lessons at once), Narad queues the item automatically and prints `Queued (position N)`; it starts on its own when a slot frees up. Tell the user the queue position. Never stop someone else's run to make room.
 4. Preparation runs in the background inside Narad and can take an hour or more for a long article. Check `node --import tsx scripts/narad.ts status <slug>` occasionally (minutes apart, not in a tight loop) or tell the user how to check. Only status `completed` means the lesson was published; report `failed`, `stopped` or `interrupted` honestly, including the error.
 5. Share the reader link (`node --import tsx scripts/narad.ts link <slug>`) and the folder path from `status`, where the sources, media, CREDITS.md, lesson.json and every agent prompt/result are saved.
 
 ## Continue, start over, stop
 
 - Interrupted, stopped or failed runs keep their finished sections; `prepare <slug> <agent>` continues from the first unfinished one. Use `--restart` only when the user explicitly asks to start over (finished sections are archived). Changing `--level` on an unfinished run also starts over — confirm with the user first.
-- `node --import tsx scripts/narad.ts stop <slug>` stops only that item's run. Never kill unrelated Codex or Claude processes.
+- `node --import tsx scripts/narad.ts stop <slug>` stops only that item's run, or removes it from the queue if it is still waiting. Never kill unrelated Codex or Claude processes.
 
 ## Limits
 

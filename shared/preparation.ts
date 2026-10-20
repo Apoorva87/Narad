@@ -22,7 +22,9 @@ export type PreparationSection = { task: string; title: string; state: string; d
 /** One item's latest preparation run, read from its folder's `preparation/progress.json`. `id`, `bundleId` and `slug` are the folder name. */
 export type PreparationJob = {
   id: string; bundleId: string; slug: string; title: string; provider: Provider;
-  status: 'running' | 'stopping' | 'completed' | 'failed' | 'stopped' | 'cancelled' | 'interrupted';
+  status: 'queued' | 'running' | 'stopping' | 'completed' | 'failed' | 'stopped' | 'cancelled' | 'interrupted';
+  /** 1-based place in the waiting queue, and the queue's length, while status is `queued`. */
+  queuePosition?: number; queueLength?: number;
   stage: string; completed: number; total: number; createdAt: string; updatedAt: string;
   sections: PreparationSection[]; folder: string;
   lessonId?: string; error?: string;
@@ -31,6 +33,7 @@ export type PreparationJob = {
 };
 export type PreparationState = {
   jobs: PreparationJob[];
-  sessions: { jobId: string; provider: Provider; pid: number; startedAt: string }[];
+  /** Every live agent process across all running lessons; `slug` (= `jobId`) names the lesson it works for. */
+  sessions: { jobId: string; slug: string; provider: Provider; pid: number; startedAt: string }[];
   providers: { id: Provider; available: boolean }[];
 };
