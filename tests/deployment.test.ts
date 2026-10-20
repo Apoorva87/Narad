@@ -1,8 +1,14 @@
 import { readFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 
 const root=new URL('../',import.meta.url);
 const text=(path:string)=>readFile(new URL(path,root),'utf8');
+const execute=promisify(execFile);
 
 it('isolates the agent from the Docker socket, host home, and Narad database',async()=>{
  const compose=await text('compose.yaml');
@@ -39,4 +45,12 @@ it('provides start, restart, kill, status, and provider-login operations',async(
 it('keeps host data, models, credentials, and dependencies out of Docker build context',async()=>{
  const ignore=await text('.dockerignore');
  for(const path of ['data','node_modules','speech/.venv','.git','.narad'])expect(ignore).toContain(path);
+});
+
+it('reports an isolated local runtime as stopped without requiring Docker',async()=>{
+ const runtime=await mkdtemp(join(tmpdir(),'narad-local-status-'));
+ try{
+  const {stdout}=await execute('bash',[new URL('../start_local.sh',import.meta.url).pathname,'status'],{cwd:new URL('../',import.meta.url).pathname,env:{...process.env,NARAD_LOCAL_RUNTIME_DIR:runtime}});
+  expect(stdout).toContain('Local Narad: stopped');expect(stdout).toContain('API: unavailable');expect(stdout).toContain('Web: unavailable');
+ }finally{await rm(runtime,{recursive:true,force:true})}
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -10,14 +10,15 @@ import { LessonStore, StoreError } from './store';
 import { cliRunner, type AgentRunner, type AgentRequest } from './agent-runner';
 import { prepareSources } from './intake';
 import { authoredSectionSchema } from './lesson-preparation';
-import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, researchSchema, reviewSchema, summarySchema, type TeachingOutput } from './generation-content';
+import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, reconcileReviewIssues, researchSchema, reviewSchema, summarySchema, teachingTaskHash, type TeachingOutput, type TeachingTask } from './generation-content';
+import { secureAgentPrompt, untrustedData } from './prompt-security';
 const levelKey:Record<Familiarity,'levelFoundational'|'levelSomeBackground'|'levelAdvanced'>={foundational:'levelFoundational','some-background':'levelSomeBackground',advanced:'levelAdvanced'};
 /** Fills the shared slots once per job; each step adds its own data slots. */
 function promptKit(settings:Settings,level:Familiarity){
   const p=settings.prompts;
   const principles=renderPrompt(p.principles,{level,levelGuidance:p[levelKey[level]]});
   const shared={principles,walkthroughGuidance:p.walkthroughGuidance,dialogueGuidance:p.dialogueGuidance,visualGuidance:p.visualGuidance,maxLinks:String(settings.research.maxLinks)};
-  return (key:'research'|'section'|'revision'|'review'|'summary',values:Record<string,string>)=>renderPrompt(p[key],{...shared,...values});
+  return (key:'research'|'section'|'revision'|'review'|'summary',values:Record<string,unknown>)=>renderPrompt(p[key],{...shared,...Object.fromEntries(Object.entries(values).map(([name,value])=>[name,untrustedData(name,value)]))});
 }
 export class PreparationService {
   private active?:{job:PreparationJob;controller:AbortController;done:Promise<void>};
@@ -51,14 +52,31 @@ export class PreparationService {
   async forget(jobs:PreparationJob[]){await Promise.all(jobs.map(job=>rm(join(this.dataDir,'preparations',job.id),{recursive:true,force:true})))}
   async shutdown(){this.closing=true;if(this.active){this.stop(this.active.job.id);await this.active.done}}
   private update(job:PreparationJob,patch:Partial<PreparationJob>){Object.assign(job,patch,{updatedAt:new Date().toISOString()});this.store.saveJob(job)}
+  private async reusableSections(current:PreparationJob,bundle:ReturnType<LessonStore['getBundle']>,tasks:TeachingTask[]):Promise<Map<string,TeachingOutput['teaching']>>{
+    const byHash=new Map<string,TeachingOutput['teaching']>();
+    for(const previous of this.store.listJobsForBundle(current.bundleId).filter(job=>job.id!==current.id&&['failed','interrupted','cancelled'].includes(job.status))){
+      const previousDir=join(this.dataDir,'preparations',previous.id);
+      try{
+        const snapshot=JSON.parse(await readFile(join(previousDir,'source-snapshot.json'),'utf8'));
+        if((snapshot.familiarity??'foundational')!==(bundle?.familiarity??'foundational'))continue;
+        const settings=JSON.parse(await readFile(join(previousDir,'settings.json'),'utf8')) as Settings;
+        const priorTasks=buildTeachingPlan(snapshot,{chunkChars:settings.preparation.chunkChars,chunkUnits:settings.preparation.chunkUnits});
+        for(const priorTask of priorTasks){
+          const hash=teachingTaskHash(priorTask);if(byHash.has(hash))continue;
+          try{const teaching=authoredSectionSchema.parse(JSON.parse(await readFile(join(previousDir,priorTask.id+'.approved.json'),'utf8')));byHash.set(hash,teaching)}catch{/* unfinished or invalid prior section */}
+        }
+      }catch{/* incomplete prior run */}
+    }
+    return new Map(tasks.flatMap(task=>{const teaching=byHash.get(teachingTaskHash(task));return teaching&&!checkTeaching(task,teaching).length?[[task.id,teaching] as const]:[]}));
+  }
   private async prepare(job:PreparationJob,signal:AbortSignal,settings:Settings){
     const cwd=join(this.dataDir,'preparations',job.id);await mkdir(cwd,{recursive:true});
     // The settings in force when the job started, kept beside its drafts so a lesson's instructions stay inspectable.
     await writeFile(join(cwd,'settings.json'),JSON.stringify(settings,null,2));
     let bundle=this.store.getBundle(job.bundleId)!;const prompt=promptKit(settings,bundle.familiarity??'foundational');
     const limits={chunkChars:settings.preparation.chunkChars,chunkUnits:settings.preparation.chunkUnits};
-    const run=async(kind:AgentRequest['kind'],name:string,prompt:string,schema:z.ZodType,images:string[]=[])=>{
-      signal.throwIfAborted();const request:AgentRequest={kind,name,prompt,schema:z.toJSONSchema(schema, { target: 'draft-7' }) as Record<string,unknown>,cwd,images,provider:job.provider,model:(job.provider==='codex'?settings.preparation.codexModel:settings.preparation.claudeModel)||undefined,timeoutMs:settings.preparation.timeoutMinutes*60_000};
+    const run=async(kind:AgentRequest['kind'],name:string,task:string,schema:z.ZodType,images:string[]=[])=>{
+      signal.throwIfAborted();const request:AgentRequest={kind,name,prompt:secureAgentPrompt(task,job.provider,images),schema:z.toJSONSchema(schema, { target: 'draft-7' }) as Record<string,unknown>,cwd,images,provider:job.provider,model:(job.provider==='codex'?settings.preparation.codexModel:settings.preparation.claudeModel)||undefined,timeoutMs:settings.preparation.timeoutMinutes*60_000};
       const result=await this.runner.run(request,signal,pid=>{this.sessions=pid?[{jobId:job.id,provider:job.provider,pid,startedAt:new Date().toISOString()}]:[]});
       signal.throwIfAborted();await writeFile(join(cwd,name+'.json'),JSON.stringify(result,null,2));return result;
     };
@@ -71,24 +89,27 @@ export class PreparationService {
     }
     await writeFile(join(cwd,'source-snapshot.json'),JSON.stringify(bundle,null,2));
     const tasks=buildTeachingPlan(bundle,limits);this.update(job,{total:tasks.length,stage:'Preparing the first section'});
+    const reusable=await this.reusableSections(job,bundle,tasks);
     const outputs:TeachingOutput[]=[];
     for(const [i,task]of tasks.entries()){
       signal.throwIfAborted();this.update(job,{stage:`Writing ${i+1}/${tasks.length} · ${task.source.title} · ${task.section.title}`});
+      const reused=reusable.get(task.id);if(reused){outputs.push({task,teaching:reused});await writeFile(join(cwd,task.id+'.approved.json'),JSON.stringify(reused,null,2));this.update(job,{completed:i+1,stage:`Reused ${i+1}/${tasks.length} · ${task.section.title}`});continue}
       const images:string[]=[];
       for(const asset of task.assets){
         const blob=this.store.getAsset(asset.src!.split('/').at(-1)!);if(!blob)throw new Error('Saved source visual is missing: '+asset.id);
         const path=join(cwd,task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(Buffer.from(blob.bytes)).png().toBuffer());images.push(path);
       }
-      const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:task.section,visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
+      const context={learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:task.section,visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)};
       const instruction=prompt('section',{input:context});
       let teaching:TeachingOutput['teaching']|undefined;let issues:string[]=[];
       for(let attempt=0;attempt<settings.preparation.reviewRounds;attempt++){
-        const raw=await run('author',task.id+'-draft-'+attempt,instruction+(issues.length?'\n'+prompt('revision',{issues:issues.join('\n'),draft:JSON.stringify(teaching)}):''),agentSectionSchema,images);
+        const raw=await run('author',task.id+'-draft-'+attempt,instruction+(issues.length?'\n'+prompt('revision',{issues,draft:teaching}):''),agentSectionSchema,images);
         const structured=agentSectionSchema.parse(raw);teaching=authoredSectionSchema.parse({...structured,units:structured.units.map(u=>({...u,question:u.question??undefined}))});
         issues=checkTeaching(task,teaching);if(issues.length)continue;
         this.update(job,{stage:`Checking ${i+1}/${tasks.length} · ${task.section.title}`});
-        const review=reviewSchema.parse(await run('review',task.id+'-review-'+attempt,prompt('review',{source:context,draft:JSON.stringify(teaching)}),reviewSchema,images));
-        issues=review.approved&&review.issues.length===0?[]:review.issues.length?review.issues:['Content review did not approve this section.'];
+        const review=reviewSchema.parse(await run('review',task.id+'-review-'+attempt,prompt('review',{source:context,draft:teaching}),reviewSchema,images));
+        const reviewIssues=reconcileReviewIssues(teaching,review.issues);
+        issues=reviewIssues.length?reviewIssues:review.issues.length?[]:review.approved?[]:['Content review did not approve this section.'];
         if(!issues.length)break;
       }
       if(issues.length||!teaching)throw new Error('Section '+task.section.title+' needs review: '+issues.join('; '));
@@ -96,7 +117,7 @@ export class PreparationService {
     }
     signal.throwIfAborted();this.update(job,{stage:'Preparing the brief summary and synthesis'});
     const summaryContext=tasks.map((task,i)=>({sourceId:task.source.id,sourceTitle:task.source.title,section:task.section.title,introduction:outputs[i].teaching.introduction}));
-    const summary=summarySchema.parse(await run('summary','summary',prompt('summary',{sections:JSON.stringify(summaryContext)}),summarySchema));
+    const summary=summarySchema.parse(await run('summary','summary',prompt('summary',{sections:summaryContext}),summarySchema));
     const lesson=compilePreparedBundle(bundle,outputs,summary.sections,'lesson-'+job.id,{limits,speakers:{host:settings.lessons.hostName,expert:settings.lessons.expertName}});signal.throwIfAborted();
     await writeFile(join(cwd,'lesson.json'),JSON.stringify(lesson,null,2));signal.throwIfAborted();
     this.store.insert(lesson);this.update(job,{status:'completed',stage:'Lesson ready · all three modes saved',lessonId:lesson.id});

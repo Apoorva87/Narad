@@ -35,6 +35,32 @@ it('plans paragraph parts with restrained focus and transition pacing',()=>{
  ]);
  expect(planSpeech?.(text).map(part=>part.text).join(' ')).toBe(text);
 });
+it('splits a dense sentence at semantic breath boundaries without changing its words',()=>{
+ const first='The controller measures incoming work, compares it with the available capacity, accounts for every active queue, and estimates how long each request has already waited';
+ const second='it then assigns the next request to the least constrained worker, records the decision, and repeats the calculation when capacity changes.';
+ const text=first+'; '+second;
+ const parts=speech.planSpeech(text);
+ expect(parts.map(part=>part.text)).toEqual([first+';',second]);
+ expect(parts.map(part=>part.text).join(' ')).toBe(text);
+});
+it('adds restrained passage-specific prosody and pronunciation guidance to the saved role style',async()=>{
+ const {block}=await setup();
+ const styles={hostStyle:'BASE HOST',tutorStyle:'BASE TUTOR'};
+ const definition=speech.speechStyle(block,styles,'Bandwidth is defined as 40 GB per second.');
+ expect(definition).toContain('BASE TUTOR');
+ expect(definition).toMatch(/definition/i);
+ expect(definition).toMatch(/40 GB per second/i);
+ expect(definition).toMatch(/restrained|natural/i);
+ const contrast=speech.speechStyle(block,styles,'However, latency falls while throughput remains unchanged.');
+ expect(contrast).toMatch(/contrast/i);
+ const conclusion=speech.speechStyle(block,styles,'Therefore, the queue is the limiting factor.');
+ expect(conclusion).toMatch(/conclusion/i);
+});
+it('can enrich standalone tutor replies with the same passage-aware delivery',()=>{
+ const enrich=(speech as typeof speech & {enrichSpeechStyle?:(style:string,text:string)=>string}).enrichSpeechStyle;
+ expect(enrich).toBeTypeOf('function');
+ expect(enrich?.('BASE REPLY','However, CPU latency remains 12 milliseconds.')).toMatch(/BASE REPLY.*contrast.*12 milliseconds/is);
+});
 it('generates saved spoken text on demand and never creates audio files, including on replay',async()=>{
  const calls:{text:string,voice:string}[]=[]; const {service,request,block,dir}=await setup(async(text,voice)=>{calls.push({text,voice});return wav()});
  const before=await readdir(dir);

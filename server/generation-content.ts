@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { parseLesson, type Lesson } from '../shared/lesson';
 import type { CapturedSource, SourceAsset, SourceBundle } from '../shared/sources';
 import { authoredSectionSchema, compileTeachingLesson, splitSourceSections, type AuthoredSection, type SourceSection, type Speakers } from './lesson-preparation';
@@ -10,6 +11,10 @@ export type Summary = z.infer<typeof summarySchema>['sections'];
 export const reviewSchema = z.object({ approved: z.boolean(), issues: z.array(z.string()) });
 export const researchSchema = z.object({ links: z.array(z.string().regex(/^https?:\/\/[^\s]+$/)).min(1).max(4), rationale: z.string() });
 export type ChunkLimits = { chunkChars: number; chunkUnits: number };
+export function teachingTaskHash(task:TeachingTask):string {
+  const content={sourceId:task.source.id,section:task.section,assets:task.assets.map(asset=>({id:asset.id,kind:asset.kind,src:asset.src,alt:asset.alt,caption:asset.caption}))};
+  return createHash('sha256').update(JSON.stringify(content)).digest('hex');
+}
 export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { chunkChars: 7000, chunkUnits: 8 }): TeachingTask[] {
   if (bundle.status !== 'captured' || bundle.sources.some(s=>s.warnings.length || s.assets.some(a=>!a.src))) throw new Error('Finish source capture and resolve its warnings before preparing a lesson.');
   const sources = bundle.sources.some(s=>s.kind !== 'note') ? bundle.sources.filter(s=>s.kind !== 'note') : bundle.sources;
@@ -55,6 +60,20 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   for (const visual of teaching.visuals) if (visual.dialogueTurns && (!visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert'))) issues.push('Visual '+visual.id+' needs both host and expert dialogue turns.');
   if(teaching.visuals.some(v=>!task.assets.some(a=>a.id===v.id)) || new Set(teaching.visuals.map(v=>v.id)).size!==teaching.visuals.length) issues.push('Unexpected or duplicate visual IDs');
   return issues;
+}
+export function reconcileReviewIssues(teaching:AuthoredSection,issues:string[]):string[] {
+  return issues.flatMap(issue=>{
+    let disprovedCount=false;
+    return issue.split(/(?<=[.!?])\s+|;\s*/).map(clause=>clause.trim()).filter(clause=>{
+      const countClaim=clause.match(/^Visual\s+([A-Za-z0-9._-]+)\s+has\s+\d+\s+dialogue turns?,?\s+(?:(?:which|and)\s+)?(?:exceed(?:s|ing)?|is\s+(?:over|above))\s+(?:the\s+)?(?:required\s+)?maximum(?:\s+of)?\s+12(?:\s+per\s+visual)?[.!?]?$/i);
+      if(countClaim){
+        const turns=teaching.visuals.find(visual=>visual.id===countClaim[1])?.dialogueTurns;
+        if(turns&&turns.length<=12){disprovedCount=true;return false}
+      }
+      if(disprovedCount&&/^(?:merge|combine|reduce|shorten|trim)\b.*\b(?:12|twelve)\s+or\s+fewer\s+(?:dialogue\s+)?turns?\b/i.test(clause))return false;
+      return true;
+    });
+  });
 }
 /** A plain-text card description from the synthesis: no Markdown or math syntax, cut at a sentence. */
 export function excerpt(markdown:string,limit=240):string {

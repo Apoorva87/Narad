@@ -86,6 +86,9 @@ export class LessonStore {
   listJobs(): PreparationJob[] {
     return this.db.prepare('SELECT document FROM preparation_jobs ORDER BY saved_at DESC, rowid DESC LIMIT 50').all().map(row=>JSON.parse(row.document as string));
   }
+  listJobsForBundle(bundleId:string):PreparationJob[] {
+    return this.db.prepare("SELECT document FROM preparation_jobs WHERE json_extract(document, '$.bundleId') = ? ORDER BY saved_at DESC, rowid DESC").all(bundleId).map(row=>JSON.parse(row.document as string));
+  }
   renameLesson(id: string, title: string): Lesson {
     const lesson = this.get(id);
     if (!lesson) throw new StoreError('Analysis not found.', 404);

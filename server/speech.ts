@@ -25,7 +25,7 @@ export class SpeechService {
     if (!block) throw new StoreError('This lesson passage was not found.',404);
     const text=splitSpeech(block.spokenText)[request.chunk];
     if (!text) throw new StoreError('This narration chunk was not found.',400);
-    return this.renderText(text,request.voice,speechStyle(block,this.store.getSettings().prompts),signal);
+    return this.renderText(text,request.voice,speechStyle(block,this.store.getSettings().prompts,text),signal);
   }
   async renderText(text: string, voice: string, style: string, signal: AbortSignal): Promise<Buffer> {
     if (this.closed) throw new StoreError('Speech is shutting down.',503);

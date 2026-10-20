@@ -1,7 +1,7 @@
 import type { PreparationService } from './preparation';
 import type { SpeechService } from './speech';
 import type { TutorService } from './tutor';
-import { speechRequestSchema, splitSpeech } from '../shared/speech';
+import { enrichSpeechStyle, speechRequestSchema, splitSpeech } from '../shared/speech';
 import { tutorAskSchema, tutorSpeechRequestSchema } from '../shared/tutor';
 import { prepareInput, renameInput } from '../shared/preparation';
 import { defaultSettings, settingsSchema, type Settings } from '../shared/settings';
@@ -65,7 +65,8 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     const chunk=splitSpeech(text)[input.chunk];if(!chunk)throw new StoreError('This tutor narration chunk was not found.',400);
     const controller=new AbortController();const cancel=()=>{if(!res.writableEnded)controller.abort()};res.on('close',cancel);
     try {
-      const styles=store.getSettings().prompts;const bytes=await narration().renderText(chunk,input.voice,input.part==='question'?styles.hostStyle:styles.tutorStyle,controller.signal);
+      const styles=store.getSettings().prompts;const roleStyle=input.part==='question'?styles.hostStyle:styles.tutorStyle;
+      const bytes=await narration().renderText(chunk,input.voice,enrichSpeechStyle(roleStyle,chunk),controller.signal);
       if(!controller.signal.aborted){res.setHeader('Content-Type','audio/wav');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','no-store');res.send(bytes)}
     } catch(error) {if(!controller.signal.aborted)throw error instanceof StoreError?error:new StoreError(error instanceof Error?error.message:'Could not prepare tutor narration.',503)}
     finally {res.off('close',cancel)}
