@@ -24,7 +24,7 @@ Implemented:
 - Topic research, captured article collections, and source-image explanations through the same preparation flow.
 - On-demand local Qwen3-TTS narration, separate narrator/host/tutor voices, meaning-aware pacing around the selected speed, pause/resume/stop, and automatic passage highlighting and scrolling. Article audio is never saved to disk.
 - Presentation mode: full-screen narration that holds the latest figure on screen until the next one, with an optional transcript. Swipe and tap gestures on touch screens; lock-screen and headphone controls via Media Session. The lock screen shows the current slide as artwork (converted to PNG, which iOS requires) and the sentence being spoken as the title.
-- Keyboard shortcuts in the reader (press `?`): Space/K play-pause, ←/→ or J/L passages, Shift+←/→ sections, 1–3 modes, −/+ speed, P present, T transcript.
+- Keyboard shortcuts in the reader (press `?`): Space/K play-pause, ←/→ or J/L passages, Shift+←/→ sections, 1–3 modes, −/+ speed, P present, T transcript, A ask the tutor while presenting.
 - Passage-specific tutor threads: type a question or dictate an editable transcript, answer from the saved lesson or ask Codex/Claude to research further, and retain the discussion under `Replies` beneath that exact passage.
 - Structured tutor answers with Markdown, equations, citations, saved source figures, and constrained teaching diagrams/plots. Expanded replies participate in narration; collapsed replies are skipped. An interrupted live answer stops afterward until you choose `Continue lesson`.
 
@@ -117,15 +117,48 @@ Measured on this Mac with the same 222-character sample: Ryan generated 19.2 sec
 | `scripts/publish-prepared-lesson.ts` | Validate a local authoring manifest, write coverage/artifact files, and optionally save through the API |
 | `server/capture.ts` | Ordered article extraction and safe SVG previews |
 | `server/download.ts` | Bounded public-network downloads with pinned DNS and redirect checks |
-| `server/store.ts` | SQLite lessons, reading positions, source snapshots, and content-addressed image blobs |
+| `server/store.ts` | SQLite app state (settings, reading positions) over the folder library |
+| `server/library-fs.ts`, `server/migrate.ts` | Per-item folders under `data/library`, and the one-time move out of SQLite |
 | `server/app.ts` | Library, import, progress, source capture/retry, and saved asset API |
 | `src/components/` | Reader, library, source view, and import UI |
-| `data/narad.sqlite` | Local library; created on first run and ignored by Git |
+| `data/library/` | One folder per item: sources, media, lesson, credits, preparation progress. Ignored by Git |
+| `data/narad.sqlite` | App state only: settings and reading positions |
 | `data/tutor.sqlite` | Passage-attached question and answer threads |
 
 `NARAD_DATA_DIR` overrides the data folder. `NARAD_PORT` overrides the API port. Set `VITE_API_TARGET` when using a different API address in development.
 
-Seeding adds missing sample IDs without overwriting existing analyses. To back up a live database, use SQLite backup facilities; alternatively stop the server before copying the data folder. Export individual lessons from the reader.
+### Browsing and editing your library
+
+Every item lives in its own folder under `data/library/`. The folder name is the item's identity, and the routes are `#lesson/<folder>` and `#sources/<folder>`:
+
+```
+data/library/
+  interpretability/
+    item.json              title, createdAt, level, status, legacyIds
+    lesson.json            the finished lesson (absent until prepared); hand-editable
+    lesson.md              readable export of the walkthrough, regenerated on publish
+    CREDITS.md             regenerated whenever sources or the lesson change
+    sources/
+      notes.md             your notes and request
+      01-<slug>.md         captured article text
+      01-<slug>.html       original page snapshot
+      01-<slug>.json       capture metadata: URL, warnings, inventory, assets with credits
+    media/                 displayed images (SVGs kept as originals too) and video poster images
+    preparation/
+      progress.json        run state, per-section state, per-call records, token usage
+      settings.json        settings used by the latest attempt
+      sections/<task>.json each approved section
+      calls/NNN-<step>-<task>.prompt.md / .result.json / .log
+      runs/<timestamp>/    earlier published versions and abandoned attempts
+```
+
+You can read these files in Finder, copy a folder to share it, or edit `lesson.json` and the Markdown by hand; Narad re-reads folders on each request. A file that no longer parses marks only that item as broken and names the problem. The preparation panel has **Open folder** and a copyable path. Renaming an item in the app renames its folder; renaming it in Finder makes it a new item (reading positions reset). Deleting an item removes its folder. Old lesson and source-collection IDs keep working through `legacyIds`. SQLite keeps only settings, deleted-sample markers and reading positions.
+
+Seeding adds missing samples as folders without overwriting existing ones. Back up by copying `data/` while the server is stopped; export individual lessons from the reader.
+
+### One-time migration
+
+On the first start after upgrading, Narad copies `narad.sqlite` to `data/backups/narad-<timestamp>.sqlite`, writes each lesson and source collection as a folder, moves old `data/preparations/<job>/` files into the matching item's `preparation/runs/legacy-<job>/`, and only then empties the old content tables. If any folder fails to validate, the database is left untouched, the failure is logged, and migration is retried on the next start. Runs that were interrupted before publishing are salvaged: approved sections whose source text still matches are imported, so **Continue** resumes where the old run stopped.
 
 ## Prepared lesson format
 
@@ -142,6 +175,14 @@ For portable imported images, use embedded PNG/JPEG/WebP data URLs. Paths under 
 Raw HTML is not rendered. Markdown images resolve only through validated lesson assets. Use explicit figure blocks to preserve caption, source, and narration associations.
 
 Structural validation does not certify factual completeness or accuracy. The preparation compiler checks source-unit and visual coverage; its publishing script also audits numeric tokens in source paragraphs. These checks complement content review and do not prove semantic equivalence.
+
+## Credits, videos and capture warnings
+
+Capture records, for each image and video, the page title and URL, the media URL, its caption, a credit line found next to it (figcaption, cite, "photo by", "courtesy", ©) and a licence only when the page declares one; nothing is guessed. `CREDITS.md` in each item folder groups these by source page. The reader shows a credit line under each source figure and lists every credit in the Sources dialog; presentation mode shows it under the held figure, and lesson export carries it.
+
+Videos (`<video>`, YouTube, Vimeo) are never downloaded. The reader streams them from the source (YouTube through `youtube-nocookie.com`) with a "Watch at the source" link that remains if the embed fails or you are offline. The poster image is saved. Starting a video pauses narration.
+
+Capture warnings come in two kinds. Blocking ones (article text unreadable, an image or poster failed to save) stop preparation until a refresh fixes them. Informational ones (interactive pieces, canvases, other iframes, MathML, merged table cells, TIFF previews) never block: each becomes a "Not captured" note in the lesson at that place, with a link to the original, and is listed in the source view.
 
 ## Source intake
 
@@ -180,6 +221,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries, persistence, tr
 
 ## Ask the contextual tutor
 
+In presentation mode, the **Ask tutor** button (or `A`) opens the same conversation in a panel over the slide: a bottom sheet on phones, a side panel on desktop. The panel stays on the passage it was opened on while narration moves on; **Back to current passage** switches it. Swiping inside the panel never changes the slide.
+
 Open any lesson passage and choose **Ask tutor**. Narad pauses narration, keeps its position, and shows a composer beneath that passage. Dictation uses the browser's speech-recognition capability and always lands in the editable text box before submission; when recognition is unavailable, type or use the operating system's keyboard dictation.
 
 **Explain this lesson** restricts the selected Codex/Claude session to the passage, its neighbors, referenced saved source text and figures, lesson familiarity, and earlier turns. **Research further** explicitly enables web search and requires titled URL citations. The question is saved before the agent starts. Reading, composing, failure, cancellation, and completion stages remain visible in the thread.
@@ -202,9 +245,9 @@ Install/sign in with the provider's CLI before starting Narad. Availability mean
 
 For a topic-only input, the agent searches for up to four source pages, which Narad captures before writing. Images are passed to the model as visual inputs. Capture warnings block preparation until resolved. Sections are split into bounded groups without dropping source units; an individual paragraph/table over 24,000 characters requires splitting the source. Display explanations, spoken scripts, visual notes, individual source summaries and synthesis are saved. A separate model call reviews each teaching group against its source and images; one correction attempt is allowed. These checks reduce omissions but do not certify truth or perfect visual interpretation.
 
-Jobs live in SQLite; `data/preparations/<job-id>/` contains source snapshots, prompts, provider output logs, approved sections, reviews, and final lesson JSON. Stop retains those files. Retrying creates a new job and does not resume or reuse old CLI sessions. Interrupted jobs are marked honestly after restart. Graceful shutdown stops active jobs; the CLI helper also watches the server IPC connection and terminates its own process group if the server disappears. A CLI call is bounded to 12 minutes and 12 MB of captured output. Long sources involve many calls and can take substantial time.
+Progress lives in the item's `preparation/` folder (see above): each approved section is saved as its own file, and every agent call leaves its prompt, result and log under `calls/`. Nothing resumes by itself. A run that was stopped, failed or interrupted by a server restart (it is marked honestly after restart) shows **Continue**, which reuses every finished section whose source text is unchanged and writes only the rest, using your current settings. **Start over** moves finished sections into `runs/` and starts fresh; changing the learner level also starts over, after asking. A single failed agent call is retried once before the section is marked failed. Sections are written two at a time by default (Settings → Preparation → **Sections at once**, 1–4); only one item is prepared at a time. The panel lists each section's state and duration, and shows tokens used by the run (input, output, cached, and cost when the agent reports it; Codex reports tokens only), summed over every call including retries. Graceful shutdown stops active jobs; the CLI helper also watches the server IPC connection and terminates its own process group if the server disappears. A CLI call is bounded to 12 minutes and 12 MB of captured output. Long sources involve many calls and can take substantial time.
 
-Preparing a new version creates a separate saved lesson and preserves the earlier one. The latest lesson becomes the source collection's default link. Export limitations above still apply.
+Preparing a new version archives the earlier `lesson.json` under `preparation/runs/` and publishes the new one in place.
 
 The repository skill is [.agents/skills/narad-prepare/SKILL.md](.agents/skills/narad-prepare/SKILL.md). Its CLI uses the same routes as the UI:
 

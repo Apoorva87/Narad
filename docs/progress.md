@@ -144,3 +144,13 @@ Expanded questions and answers join normal narration. Collapsed threads are skip
 Added root `ARCHITECTURE.md`, executable `setup.sh`, a focused design/plan, API/store/context/playback tests, and a browser composer regression. A full browser run exposed an existing delayed-focus race in prompt slot insertion; the scheduled refocus now occurs only while that slot button still owns focus.
 
 Final verification: **104 unit/integration tests and 30 browser tests pass; TypeScript and the production build pass**. The existing non-blocking initial-bundle size advisory remains. A real Codex lesson-only tutor request also completed successfully; its temporary thread was removed afterward.
+
+
+## Library folders
+
+Items moved from SQLite into one folder each under `data/library/` (sources, media, `lesson.json`, `lesson.md`, `CREDITS.md`, `preparation/`). SQLite keeps settings and reading positions. Design: `docs/superpowers/specs/2026-10-19-library-folders-design.md`.
+
+- Preparation is resumable: **Continue** reuses finished sections with unchanged source text, **Start over** archives them under `runs/`; interrupted runs are never restarted automatically. Sections are written in parallel (Settings → Sections at once, default 2). One failed call is retried once.
+- Credits are captured for images and videos and shown in the reader, presentation mode, and `CREDITS.md`. Videos stream from the source and are never stored. Warnings are blocking or informational; informational ones become "Not captured" notes.
+- One-time migration backs up `narad.sqlite` to `data/backups/`, writes folders, moves old job files into `runs/legacy-*`, and salvages finished sections of interrupted runs so Continue resumes them. On any failure SQLite stays untouched and migration retries at the next start.
+- Follow-ups: token usage (input, output, cached, cost where known) is recorded per run in `progress.json` and shown in the preparation panel; presentation mode has an Ask tutor panel (`A`) tied to the passage it was opened on.
