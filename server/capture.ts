@@ -5,6 +5,7 @@ import { gfm } from 'turndown-plugin-gfm';
 import sharp from 'sharp';
 import type { CapturedSource, AssetBlob, SourceAsset, VideoRef, Credit } from '../shared/sources';
 import { downloadPublic } from './download';
+import { portableTextArticle } from './capture-portable-text';
 export type Download = (url: string) => Promise<{ bytes: Buffer; type: string; url: string }>;
 export function assetBlob(bytes: Buffer, type: string): AssetBlob {
   return { id: createHash('sha256').update(bytes).digest('hex'), bytes, type };
@@ -72,6 +73,15 @@ export async function captureArticle(url: string, download: Download = downloadP
     element.replaceWith($('<span>').attr('data-narad-math', element.text()).attr('data-display', element.attr('type')?.includes('mode=display') ? 'block' : 'inline').text(element.text()));
   });
   root.find('script, style, nav, button, noscript, form').remove();
+  // Next.js/Sanity pages may render text but leave figures in the RSC payload; rebuild the body from it then.
+  if (!root.find('img, svg, picture, video, iframe, canvas').length && root.text().trim()) {
+    const article = portableTextArticle(html, root.text(), source.title);
+    if (article) {
+      root.html(article.html);
+      source.inventory = { images: root.find('img').length, inlineSvg: 0, tables: 0, savedVisuals: 0 };
+      for (const type of article.skipped) source.warnings.push({ kind: 'info', message: 'A "' + type + '" block in the article body could not be captured. Open the original: ' + response.url });
+    }
+  }
   if (root.find('audio').length) source.warnings.push({ kind: 'info', message: 'This page includes audio that a static capture cannot keep. Check the original: ' + response.url });
   if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push({ kind: 'info', message: 'A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.' });
   const blobs: AssetBlob[] = []; let downloadedBytes = response.bytes.length;
