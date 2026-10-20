@@ -14,48 +14,83 @@ const MAX_WIDTH = 1600;
 const isItem = (value: Json | undefined): value is Item => !!value && typeof value === 'object' && !Array.isArray(value);
 const str = (value: Json | undefined) => typeof value === 'string' ? value : undefined;
 const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-// React escapes RSC strings that begin with "$" by doubling it.
-const rscText = (text: string) => text.startsWith('$$') ? text.slice(1) : text;
+type TextOf = (raw: string) => string;
+// React escapes RSC strings that begin with "$" by doubling it; long strings become "$<id>" references to text rows.
+const textResolver = (text: Map<string, string> = new Map()): TextOf => raw =>
+  raw.startsWith('$$') ? raw.slice(1) : /^\$[0-9a-f]{1,8}$/i.test(raw) ? text.get(raw.slice(1).toLowerCase()) ?? '' : raw;
 
-/** Concatenated, JSON-unescaped string payloads of `self.__next_f.push([1, "…"])` chunks. */
+/** Concatenated, JSON-unescaped string payloads of `self.__next_f.push([1, "…"])` chunks; '' if over the size cap. */
 export function rscPayload(html: string): string {
-  let payload = '';
-  for (const match of html.matchAll(/self\.__next_f\.push\(\[\s*1\s*,\s*("(?:[^"\\]|\\.)*")\s*\]\)/g)) {
-    try { payload += JSON.parse(match[1]) as string; } catch { /* A corrupt chunk only loses its own text. */ }
-    if (payload.length > MAX_PAYLOAD) break;
+  let payload = ''; const marker = 'self.__next_f.push(';
+  // Scanned by hand: a backtracking regex over a multi-megabyte string literal overflows V8's stack.
+  for (let at = html.indexOf(marker); at >= 0; at = html.indexOf(marker, at + 1)) {
+    const head = /^\[\s*1\s*,\s*"/.exec(html.slice(at + marker.length, at + marker.length + 32));
+    if (!head) continue;
+    const open = at + marker.length + head[0].length - 1; let close = open + 1;
+    while (close < html.length && html[close] !== '"') close += html[close] === '\\' ? 2 : 1;
+    if (close >= html.length) break;
+    // Checked before decoding and appending, so the payload never exceeds the cap. Oversized pages keep the text capture.
+    if (payload.length + close - open > MAX_PAYLOAD) return '';
+    try { payload += JSON.parse(html.slice(open, close + 1)) as string; } catch { /* A corrupt chunk only loses its own text. */ }
+    at = close;
   }
   return payload;
 }
 
-/** Every JSON array of objects in the payload that parses and has portable-text blocks at its top level. */
-function portableTextArrays(payload: string): Item[][] {
-  const found: Item[][] = [];
-  // RSC rows are newline-separated and JSON rows never contain raw newlines, so scanning line by line keeps
-  // raw text rows (`id:T…`) from desynchronising the string tracking for the rest of the payload.
-  for (const line of payload.split('\n')) {
-    if (!line.includes('"_type":"block"')) continue;
-    const starts: number[] = []; let inString = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (inString) { if (c === '\\') i++; else if (c === '"') inString = false; continue; }
-      if (c === '"') inString = true;
-      else if (c === '[') starts.push(i);
-      else if (c === ']') {
-        const start = starts.pop();
-        if (start === undefined || line[start + 1] !== '{') continue;
-        const slice = line.slice(start, i + 1);
-        if (!slice.includes('"_type":"block"')) continue;
-        let value: Json;
-        try { value = JSON.parse(slice) as Json; } catch { continue; }
-        if (Array.isArray(value) && value.every(item => isItem(item) && typeof item._type === 'string') && value.some(item => isItem(item) && item._type === 'block')) found.push(value as Item[]);
-      }
+const MAX_NODES = 2_000_000;
+const MAX_CANDIDATES = 500;
+type Rows = { json: string[]; text: Map<string, string> };
+/**
+ * Split an RSC payload into rows. JSON rows are `id:JSON\n`; text rows are `id:T<hex byte length>,<text>`
+ * with no terminator, so they are measured in UTF-8 bytes rather than split on newlines.
+ */
+export function rscRows(payload: string): Rows {
+  const rows: Rows = { json: [], text: new Map() }; let pos = 0;
+  const toLineEnd = (from: number) => { const nl = payload.indexOf('\n', from); return nl < 0 ? payload.length : nl; };
+  while (pos < payload.length) {
+    const head = /^([0-9a-f]{1,8}):/i.exec(payload.slice(pos, pos + 10));
+    if (!head) { pos = toLineEnd(pos) + 1; continue; }
+    const body = pos + head[0].length;
+    const text = payload[body] === 'T' ? /^T([0-9a-f]{1,8}),/i.exec(payload.slice(body, body + 11)) : null;
+    if (text) {
+      const length = parseInt(text[1], 16); let i = body + text[0].length; let bytes = 0;
+      while (i < payload.length && bytes < length) { const cp = payload.codePointAt(i)!; bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; i += cp > 0xffff ? 2 : 1; }
+      rows.text.set(head[1].toLowerCase(), payload.slice(body + text[0].length, i)); pos = i; continue;
+    }
+    const end = toLineEnd(body); rows.json.push(payload.slice(body, end)); pos = end + 1;
+  }
+  return rows;
+}
+
+/**
+ * Every JSON array in the payload whose items all have a `_type` and include portable-text blocks.
+ * Linear time: each JSON row is parsed once, then walked iteratively with node and candidate caps, so nesting
+ * depth cannot multiply the work or overflow the stack. Rows that are not valid JSON are skipped.
+ */
+function portableTextArrays(rows: Rows): Item[][] {
+  const found: Item[][] = []; let nodes = 0;
+  for (const row of rows.json) {
+    if (!row.includes('"_type":"block"')) continue;
+    let root: Json;
+    try { root = JSON.parse(row) as Json; } catch { continue; }
+    const stack: Json[] = [root];
+    while (stack.length) {
+      if (++nodes > MAX_NODES) return found;
+      const value = stack.pop()!;
+      if (Array.isArray(value)) {
+        if (value.length && value.every(item => isItem(item) && typeof item._type === 'string') && value.some(item => isItem(item) && item._type === 'block')) {
+          found.push(value as Item[]);
+          if (found.length >= MAX_CANDIDATES) return found;
+        }
+        for (let i = value.length - 1; i >= 0; i--) stack.push(value[i]);
+      } else if (isItem(value)) for (const child of Object.values(value)) if (child && typeof child === 'object') stack.push(child);
     }
   }
   return found;
 }
 
 const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => word.length >= 3));
-const blockText = (item: Item) => Array.isArray(item.children) ? item.children.map(child => isItem(child) ? rscText(str(child.text) ?? '') : '').join('') : '';
+const blockText = (item: Item, textOf: TextOf) => Array.isArray(item.children) ? item.children.map(child => isItem(child) ? textOf(str(child.text) ?? '') : '').join('') : '';
 
 const ASSET_ID = /^image-([0-9a-f]{20,64})-(\d+)x(\d+)-([a-z0-9]+)$/i;
 const SANITY_URL = /^https:\/\/cdn\.sanity\.io\/images\/[a-z0-9]+\/[\w-]+\/[0-9a-f]{20,64}-(\d+)x\d+\.([a-z0-9]+)(\?.*)?$/i;
@@ -96,10 +131,10 @@ function sanityProject(html: string, payload: string) {
 }
 
 const DECORATORS: Record<string, string> = { strong: 'strong', em: 'em', code: 'code', underline: 'u', 'strike-through': 's' };
-function inline(item: Item): string {
+function inline(item: Item, textOf: TextOf): string {
   const defs = new Map((Array.isArray(item.markDefs) ? item.markDefs : []).filter(isItem).map(def => [str(def._key), def]));
   return (Array.isArray(item.children) ? item.children : []).filter(isItem).map(child => {
-    let html = esc(rscText(str(child.text) ?? '')).replace(/\n/g, '<br>');
+    let html = esc(textOf(str(child.text) ?? '')).replace(/\n/g, '<br>');
     if (!html) return '';
     let href: string | undefined;
     for (const mark of (Array.isArray(child.marks) ? child.marks : []).map(str)) {
@@ -115,7 +150,7 @@ const isVideoHost = (url: string) => { try { return /(^|\.)(youtube\.com|youtube
 const CONTENT_FIELDS = ['text', 'body', 'content', 'html', 'markdown', 'title', 'children', 'rows', 'items'];
 
 /** Rebuild an article body from portable text, in order. Unrenderable content blocks are named in `skipped`. */
-export function renderPortableText(items: Item[], project?: { projectId: string; dataset: string }): PortableTextArticle {
+export function renderPortableText(items: Item[], project?: { projectId: string; dataset: string }, textOf: TextOf = textResolver()): PortableTextArticle {
   let html = ''; let figures = 0; const skipped: string[] = [];
   const lists: { tag: string; level: number; open: boolean }[] = [];
   const closeList = () => { const list = lists.pop()!; html += (list.open ? '</li>' : '') + `</${list.tag}>`; };
@@ -124,7 +159,7 @@ export function renderPortableText(items: Item[], project?: { projectId: string;
     const listItem = type === 'block' ? str(item.listItem) : undefined;
     if (!listItem) while (lists.length) closeList();
     if (type === 'block') {
-      const content = inline(item);
+      const content = inline(item, textOf);
       if (listItem) {
         const level = typeof item.level === 'number' && item.level > 0 ? item.level : 1; const tag = listItem === 'number' ? 'ol' : 'ul';
         while (lists.length && lists.at(-1)!.level > level) closeList();
@@ -133,7 +168,7 @@ export function renderPortableText(items: Item[], project?: { projectId: string;
         const list = lists.at(-1)!; html += (list.open ? '</li>' : '') + '<li>' + content; list.open = true;
         continue;
       }
-      if (!blockText(item).trim()) continue;
+      if (!blockText(item, textOf).trim()) continue;
       const style = str(item.style) ?? 'normal';
       html += /^h[1-6]$/.test(style) ? `<${style}>${content}</${style}>` : style === 'blockquote' ? `<blockquote><p>${content}</p></blockquote>` : `<p>${content}</p>`;
       continue;
@@ -172,15 +207,16 @@ export function renderPortableText(items: Item[], project?: { projectId: string;
 export function portableTextArticle(html: string, pageText: string, title?: string): PortableTextArticle | undefined {
   const payload = rscPayload(html);
   if (!payload.includes('"_type":"block"')) return undefined;
+  const rows = rscRows(payload); const textOf = textResolver(rows.text);
   const page = words(pageText);
   let best: { items: Item[]; matched: number } | undefined;
-  for (const items of portableTextArrays(payload)) {
-    const vocabulary = words(items.map(item => item._type === 'block' ? blockText(item) : '').join(' '));
+  for (const items of portableTextArrays(rows)) {
+    const vocabulary = words(items.map(item => item._type === 'block' ? blockText(item, textOf) : '').join(' '));
     let matched = 0; for (const word of vocabulary) if (page.has(word)) matched++;
     if (matched >= 12 && matched / vocabulary.size >= 0.6 && matched > (best?.matched ?? 0)) best = { items, matched };
   }
   if (!best || !best.items.some(item => !!imageRef(item))) return undefined;
-  const article = renderPortableText(best.items, sanityProject(html, payload));
+  const article = renderPortableText(best.items, sanityProject(html, payload), textOf);
   if (title && !best.items.some(item => item._type === 'block' && item.style === 'h1')) article.html = `<h1>${esc(title)}</h1>` + article.html;
   return article;
 }

@@ -210,7 +210,7 @@ describe('Next.js pages with Sanity portable text figures', () => {
   const body = [
     block('Neural networks have grown exponentially, and the memory they need has grown with them.'),
     { _key: 'i1', _type: 'imageBlock', caption: 'Figure 1. The compute core.', image: { altText: 'Core diagram', asset: { _id: `image-${H1}-800x600-png`, _type: 'sanity.imageAsset' } } },
-    block('Each core holds its own memory, so bandwidth scales with the number of cores.'),
+    block('$1f'), // Long strings move to an RSC text row and are referenced as "$<id>".
     block('Memory design', 'h2'),
     { _key: 'p2', _type: 'block', style: 'normal', markDefs: [{ _key: 'lnk', _type: 'link', href: 'https://example.org/paper' }],
       children: [span('Weights stream from '), span('external storage', ['strong']), span(' while activations stay '), span('on chip', ['em', 'lnk']), span('.')] },
@@ -220,13 +220,15 @@ describe('Next.js pages with Sanity portable text figures', () => {
     block('Linear scaling', 'normal', { listItem: 'bullet', level: 1 }),
   ];
   const decoy = [block('Another post about networking chips'), { _key: 'd1', _type: 'image', asset: { _ref: `image-${DECOY}-400x300-png` } }];
-  const payloadOf = (body: object[]) => '0:["$","html",null,{}]\n5:' + JSON.stringify({ page: { title: 'Inside the wafer', mainImage: { url: `https://cdn.sanity.io/images/abc123/production/${'8'.repeat(40)}-1200x630.png` }, body },
+  const LONG = 'Each core’s memory is local — so bandwidth scales with the number of cores. 🚀';
+  // Text rows are length-prefixed in UTF-8 bytes and the next row follows with no newline, as on real pages.
+  const payloadOf = (body: object[]) => '0:["$","html",null,{}]\n1f:T' + Buffer.byteLength(LONG).toString(16) + ',' + LONG + '5:' + JSON.stringify({ page: { title: 'Inside the wafer', mainImage: { url: `https://cdn.sanity.io/images/abc123/production/${'8'.repeat(40)}-1200x630.png` }, body },
     related: [{ title: 'Another post about networking chips', body: decoy, thumbnail: { url: `https://cdn.sanity.io/images/abc123/production/${DECOY}-400x300.png` } }] }) + '\n';
   const payload = payloadOf(body);
   // The payload is split across several chunks, mid-array, as Next.js does.
   const pushes = (text: string) => [0, 300, 900, text.length].slice(0, -1).map((start, i, starts) => '<script>self.__next_f.push([1,' + JSON.stringify(text.slice(start, starts[i + 1] ?? text.length)) + '])</script>').join('');
   const ssr = '<main><h1>Inside the wafer</h1><p>Neural networks have grown exponentially, and the memory they need has grown with them.</p><p>Figure 1. The compute core.</p>'
-    + '<p>Each core holds its own memory, so bandwidth scales with the number of cores.</p><h2>Memory design</h2><p>Weights stream from <b>external storage</b> while activations stay on chip.</p><p>Figure 2. The wafer fabric.</p>'
+    + '<p>Each core’s memory is local — so bandwidth scales with the number of cores. 🚀</p><h2>Memory design</h2><p>Weights stream from <b>external storage</b> while activations stay on chip.</p><p>Figure 2. The wafer fabric.</p>'
     + '<p>Scaling out therefore needs no model partitioning at all.</p><ul><li>Fewer moving parts</li><li>Linear scaling</li></ul><aside><h3>Related</h3><a href="/blog/other">Another post about networking chips</a></aside></main>';
   const page = (scripts: string, main = ssr) => '<html><head><title>Inside the wafer | Blog</title></head><body>' + main + scripts + '</body></html>';
   const run = async (html: string, failImages = false) => {
@@ -246,7 +248,7 @@ describe('Next.js pages with Sanity portable text figures', () => {
     expect(requested).toEqual(['https://blog.example.com/post',
       `https://cdn.sanity.io/images/abc123/production/${H1}-800x600.png`,
       `https://cdn.sanity.io/images/abc123/production/${H2}-2400x1200.jpg?w=1600&fit=max`]);
-    expect(source.markdown).toMatch(/grown with them\.\s+!\[Core diagram\]\(source-asset-0\)\s+Figure 1\. The compute core\.\s+Each core holds[\s\S]*## Memory design\s+Weights stream from \*\*external storage\*\* while activations stay \[_on chip_\]\(https:\/\/example\.org\/paper\)\.\s+!\[Fabric layout\]\(source-asset-1\)\s+Figure 2\. The wafer fabric\.\s+Scaling out[\s\S]*\*\s+Fewer moving parts\s+\*\s+Linear scaling/);
+    expect(source.markdown).toMatch(/grown with them\.\s+!\[Core diagram\]\(source-asset-0\)\s+Figure 1\. The compute core\.\s+Each core’s memory is local — so bandwidth scales with the number of cores\. 🚀\s+## Memory design\s+Weights stream from \*\*external storage\*\* while activations stay \[_on chip_\]\(https:\/\/example\.org\/paper\)\.\s+!\[Fabric layout\]\(source-asset-1\)\s+Figure 2\. The wafer fabric\.\s+Scaling out[\s\S]*\*\s+Fewer moving parts\s+\*\s+Linear scaling/);
     expect(source.markdown).not.toContain(DECOY);
     expect(source.markdown).not.toContain('Another post about networking');
     expect(source.assets.map(a => [a.id, a.kind, a.alt, a.caption])).toEqual([['source-asset-0', 'image', 'Core diagram', 'Figure 1. The compute core.'], ['source-asset-1', 'image', 'Fabric layout', 'Figure 2. The wafer fabric.']]);
@@ -287,6 +289,29 @@ describe('Next.js pages with Sanity portable text figures', () => {
     expect(source.warnings.map(w => w.kind)).toEqual(['blocking', 'blocking']);
     expect(isBlocking(source)).toBe(true);
     expect(source.markdown).toMatch(/source-asset-0[\s\S]*Memory design[\s\S]*source-asset-1/);
+  });
+  it('bounds the work on deeply nested hostile payloads and falls back to the text capture', async () => {
+    const level = '[{"_type":"block","style":"normal","markDefs":[],"children":[{"_type":"span","text":"Neural networks have grown exponentially memory bandwidth cores"}],"x":';
+    const depth = 4000; // ~400 KB of nested portable-text arrays
+    const hostile = '5:' + level.repeat(depth) + 'null' + '}]'.repeat(depth) + '\n';
+    const started = performance.now();
+    const { source, requested } = await run(page(pushes(hostile)));
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(requested).toEqual(['https://blog.example.com/post']);
+    expect(source.warnings).toEqual([]);
+    expect(source.markdown).toContain('Scaling out therefore');
+    const oversized = '<script>self.__next_f.push([1,' + JSON.stringify('9:"' + 'a'.repeat(11 * 1024 * 1024) + '"\n') + '])</script>';
+    const huge = await run(page(oversized + pushes(payload)));
+    expect(huge.requested).toEqual(['https://blog.example.com/post']);
+    expect(huge.source.warnings).toEqual([]);
+  });
+  it('never lets javascript: or data: link annotations into the markdown', async () => {
+    const unsafe = body.map(item => item._key === 'p2' ? { ...item, markDefs: [{ _key: 'lnk', _type: 'link', href: 'javascript:alert(1)' }, { _key: 'd', _type: 'link', href: 'data:text/html,<script>alert(1)</script>' }],
+      children: [...(item as { children: object[] }).children, span(' more', ['d'])] } : item);
+    const { source } = await run(page(pushes(payloadOf(unsafe))));
+    expect(source.assets).toHaveLength(2);
+    expect(source.markdown).toContain('on chip');
+    expect(source.markdown).not.toMatch(/javascript:|data:/i);
   });
   it('renders code blocks, keeps GIF originals, and names unknown content blocks in an info warning', async () => {
     const extra = [...body.slice(0, 3),
