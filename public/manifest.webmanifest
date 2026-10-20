@@ -1,0 +1,14 @@
+{
+  "name": "Narad — A voice for your everyday learning",
+  "short_name": "Narad",
+  "description": "Turn sources into visual lessons you can read and hear.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fc",
+  "theme_color": "#244fc5",
+  "icons": [
+    { "src": "/narad-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/narad-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

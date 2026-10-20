@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLesson } from '../shared/lesson';
-import { flattenBlocks, moveBlock } from '../shared/navigation';
+import { flattenBlocks, latestFigureIndex, moveBlock } from '../shared/navigation';
+import samples from '../content/samples.json';
 import { minimalLesson } from './fixture';
 
 describe('prepared lesson boundary', () => {
@@ -38,5 +39,15 @@ describe('reader navigation', () => {
   });
   it('returns no blocks for a mode that has not been prepared', () => {
     expect(flattenBlocks(parseLesson(minimalLesson()), 'dialogue')).toEqual([]);
+  });
+});
+describe('latest figure', () => {
+  it('holds the most recent figure until the next one appears', () => {
+    const lesson = samples.find(item => item.id === 'gradient-descent')!;
+    const blocks = flattenBlocks(parseLesson(lesson), 'walkthrough');
+    const figure = blocks.findIndex(item => item.block.kind === 'figure');
+    expect(latestFigureIndex(blocks, figure - 1)).toBe(-1);
+    expect(latestFigureIndex(blocks, figure)).toBe(figure);
+    expect(latestFigureIndex(blocks, blocks.length - 1)).toBe(figure);
   });
 });

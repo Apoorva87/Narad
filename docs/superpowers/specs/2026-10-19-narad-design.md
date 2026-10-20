@@ -23,7 +23,7 @@ Turn resources or a research topic into faithful, understandable lessons that th
 ## Four feedback checkpoints
 1. **Reader and content foundation:** persistent library, three mode rendering, source viewer, math, local diagrams, section/block navigation, saved reading position, validated prepared-lesson import/export. Two explicitly authored sample lessons demonstrate the contract. Generation, speech, and tutoring are visibly unavailable until their own stages.
 2. **Research and preparation:** resource ingestion, extraction including original visual assets, source inventory, agent generation, structural and content checks, simple jobs/session controls, Codex skill entry point. Validate against an actual article/paper with the user.
-3. **Speech:** local server setup and listening comparison, chunked narration, voice selection, rate changes, audio reuse, navigation/highlighting and interruption. Do not promise exact word timing without measured support.
+3. **Speech:** local server setup and listening comparison, on-demand chunked narration without saved article audio, voice selection, rate changes, navigation/highlighting and interruption. Do not promise exact word timing without measured support.
 4. **Interactive tutor and adaptation:** contextual questions, streamed answers/audio, optional detours, accept/bypass/resume, familiarity assessment and revisions.
 
 Stop after each checkpoint, demonstrate working behavior and limits, and request feedback. Do not build stages 2–4 in stage 1.
@@ -57,3 +57,13 @@ Full process orchestration platform, multi-user deployment, voice cloning studio
 ## Confirmed feedback — source intake and identity (2026-10-19)
 
 Narad’s logo should reference Narada from Hindu mythology; initial implementation uses a simplified veena motif. A new lesson can begin with images, plain text ideas, multiple article links, or a mixture. Preserve every original figure, plot, equation, and factual table in detailed learning material. Additional explanatory diagrams may be generated when useful, with explicit teaching provenance; they supplement the original source visuals. Source intake gets its own reviewable checkpoint within Part 2.
+
+Brand tagline confirmed by the user: **A voice for your everyday learning**.
+
+## Confirmed feedback — narration storage (2026-10-19)
+
+Voices approved. Keep the TTS model running on the host and supply text/paragraphs as the reader advances. Do not persist generated article WAVs or accumulate an audio cache. Short-lived in-memory current/look-ahead audio is allowed for smooth playback and pause/resume; release it after use. Replays synthesize again from saved text. Model weights, lesson text, images and reading progress remain persistent.
+
+## Confirmed feedback — contextual tutor (2026-10-19)
+
+Help is a persistent message board beneath the exact passage, normally collapsed under `Replies`. Questions may be typed or dictated into an editable transcript. The request receives surrounding lesson context and can either stay within the lesson or research further with citations. Complete validated answers may contain saved teaching diagrams and plots rendered inside the reply. Expanded questions and answers join normal narration; collapsed threads are skipped. If a live answer interrupts playback, stop after that answer and let the learner explicitly continue the lesson.

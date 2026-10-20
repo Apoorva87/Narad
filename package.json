@@ -7,6 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "speech:setup": "uv sync --project speech --python 3.12 && speech/.venv/bin/python speech/setup.py",
     "dev": "concurrently -k -n api,web \"tsx watch server/index.ts\" \"vite --host 127.0.0.1 --port 5178 --strictPort\"",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",

@@ -1,0 +1,8 @@
+[project]
+name = "narad-speech"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["mlx-audio==0.6.0"]
+
+[tool.uv]
+package = false

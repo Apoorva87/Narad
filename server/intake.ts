@@ -15,10 +15,11 @@ export async function retrySources(previous: SourceBundle, download?: Download):
   return { bundle: { ...previous, sources, status: sources.some(source => source.warnings.length) ? 'needs-review' : 'captured' }, blobs };
 }
 
-export async function prepareSources(input: SourceInput, download?: Download): Promise<{ bundle: SourceBundle; blobs: AssetBlob[] }> {
-  const { title, text, images } = sourceInputSchema.parse(input);
+export async function prepareSources(input: SourceInput, download?: Download, limits: { maxLinks: number; maxImages: number } = { maxLinks: 8, maxImages: 6 }): Promise<{ bundle: SourceBundle; blobs: AssetBlob[] }> {
+  const { title, text, images, familiarity } = sourceInputSchema.parse(input);
   const urls = [...new Set((text.match(/https?:\/\/[^\s<>"\]]+/g) ?? []).map(url => url.replace(/[),.;]+$/, '')))];
-  if (urls.length > 8) throw new StoreError('Add up to 8 links at a time.', 400);
+  if (urls.length > limits.maxLinks) throw new StoreError('Add up to ' + limits.maxLinks + ' links at a time. Change the limit in Settings.', 400);
+  if (images.length > limits.maxImages) throw new StoreError('Add up to ' + limits.maxImages + ' images at a time. Change the limit in Settings.', 400);
   const sources: CapturedSource[] = []; const blobs: AssetBlob[] = [];
   const inventory = () => ({ images: 0, inlineSvg: 0, tables: 0, savedVisuals: 0 });
   if (text) sources.push({ id: randomUUID(), title: 'Your notes & learning intent', kind: 'note', markdown: text, assets: [], warnings: [], inventory: inventory() });
@@ -35,5 +36,5 @@ export async function prepareSources(input: SourceInput, download?: Download): P
     catch (error) { sources.push({ id: randomUUID(), title: url, kind: 'article', url, markdown: '', assets: [], warnings: [error instanceof Error ? error.message : 'Could not capture this link.'], inventory: inventory() }); }
   }
   const inferredTitle = sources.find(source => source.kind === 'article' && source.markdown)?.title || text.replace(/https?:\/\/\S+/g, '').trim().split('\n')[0] || images[0]?.name || 'New learning idea';
-  return { bundle: { id: randomUUID(), title: title || inferredTitle.slice(0, 180), text, sources, createdAt: new Date().toISOString(), status: sources.some(source => source.warnings.length) ? 'needs-review' : 'captured' }, blobs };
+  return { bundle: { id: randomUUID(), title: title || inferredTitle.slice(0, 180), text, familiarity, sources, createdAt: new Date().toISOString(), status: sources.some(source => source.warnings.length) ? 'needs-review' : 'captured' }, blobs };
 }

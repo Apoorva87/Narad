@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileUp, Download, LoaderCircle } from 'lucide-react';
-import { api, downloadLesson } from '../lib/api';
+import { api, exportLesson } from '../lib/api';
 import type { Lesson } from '../../shared/lesson';
 import { Modal } from './Modal';
 
@@ -21,7 +21,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     finally { setBusy(false); if (input.current) input.current.value = ''; }
   }
   async function example() {
-    try { downloadLesson(await api.lesson('bayesian-reasoning')); } catch { setError('Could not download the example. Check the local server.'); }
+    try { await exportLesson('bayesian-reasoning'); } catch { setError('Could not download the example. Check the local server.'); }
   }
   return <Modal title="Add a prepared lesson" onClose={onClose}>
     <p className="modal-description">Bring a saved Narad lesson into your library. Its explanations, source snapshots, and embedded images stay together.</p>

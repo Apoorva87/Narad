@@ -55,6 +55,14 @@ describe('source preservation', () => {
     expect(source.markdown).toContain('x = 42');
     expect(source.warnings).toEqual([]);
   });
+  it('keeps currency amounts and linked footnote markers as plain text', async () => {
+    const html = '<article><p>It costs $5 to $10 per hour.<sup class="reference"><a href="#cite-1">[1]</a></sup></p></article>';
+    const { source } = await captureArticle('https://example.com/', async url => ({ bytes: Buffer.from(html), type: 'text/html', url }));
+    const rendered = renderToStaticMarkup(createElement(Markdown, { children: source.markdown }));
+    expect(rendered).not.toContain('katex');
+    expect(rendered).toContain('$5 to $10 per hour.');
+    expect(rendered).toContain('[1]');
+  });
   it('preserves GIF original bytes rather than replacing the original with a PNG', async () => {
     const gif = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'red' } }).gif().toBuffer();
     const { source, blobs } = await captureArticle('https://example.com/', async url => ({ bytes: url.endsWith('.gif') ? gif : Buffer.from('<article><img src="plot.gif"></article>'), type: url.endsWith('.gif') ? 'image/gif' : 'text/html', url }));

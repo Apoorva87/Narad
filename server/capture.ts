@@ -107,6 +107,9 @@ export async function captureArticle(url: string, download: Download = downloadP
     try { const href = new URL($(node).attr('href')!, response.url); $(node).attr('href', /^https?:$/.test(href.protocol) ? href.href : ''); } catch { $(node).removeAttr('href'); }
   });
   const converter = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' }); converter.use(gfm);
+  // Article text such as "$5 to $10" must not become math; only the rules below emit $ delimiters.
+  const escapeText = converter.escape.bind(converter);
+  converter.escape = text => escapeText(text).replace(/\$/g, '\\$');
   converter.addRule('visuals-inside-code', {
     filter: node => ['CODE', 'PRE'].includes(node.nodeName) && !!node.querySelector('img, [data-narad-math]'),
     replacement: content => content,
@@ -120,7 +123,8 @@ export async function captureArticle(url: string, download: Download = downloadP
   });
   converter.addRule('superscript-subscript', {
     filter: ['sup', 'sub'],
-    replacement: (content, node) => '$' + (node.nodeName === 'SUP' ? '^' : '_') + '{' + content + '}$',
+    // Footnote markers like <sup><a>[1]</a></sup> stay as text; KaTeX cannot render links.
+    replacement: (content, node) => (node as HTMLElement).querySelector('a') || /[[\]()]/.test(content) ? content : '$' + (node.nodeName === 'SUP' ? '^' : '_') + '{' + content + '}$',
   });
   converter.addRule('all-tables', {
     filter: 'table',

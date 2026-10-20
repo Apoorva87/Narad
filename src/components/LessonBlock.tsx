@@ -19,11 +19,11 @@ export function LessonBlock({ block, lesson, active, onSelect, onSource }: {
     {asset && <figure>
       {imageFailed ? <div role="alert" className="error-box">This image could not be loaded: {asset.alt}</div>
         : <button className="figure-button" onClick={() => setExpanded(true)} aria-label={'Enlarge diagram: ' + asset.alt}>
-          <img src={asset.src} alt={asset.alt} onError={() => setImageFailed(true)} /><span className="enlarge-label"><Maximize2 size={14} /> Enlarge</span>
+          <img src={asset.src} alt={asset.alt} loading="lazy" onError={() => setImageFailed(true)} /><span className="enlarge-label"><Maximize2 size={14} /> Enlarge</span>
         </button>}
       <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}</figcaption>
     </figure>}
-    <Markdown>{block.markdown}</Markdown>
+    <Markdown assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>
     <div className="block-attribution">
       {block.references.map(ref => <button key={ref.sourceId + ref.locator} onClick={() => onSource(ref.sourceId, ref.locator)}><BookOpen size={12} />{ref.locator}</button>)}
       {block.origin === 'teaching' && <span>Added explanation</span>}

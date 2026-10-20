@@ -3,13 +3,14 @@ import { minimalLesson } from './fixture';
 
 test('library search opens a complete reader with math and saved diagrams', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('textbox', { name: 'Search lessons' }).fill('evidence');
-  await expect(page.locator('.lesson-card')).toHaveCount(1);
-  await page.locator('.lesson-card').click();
+  await page.getByRole('searchbox', { name: 'Search lessons' }).fill('evidence');
+  await expect(page.locator('.lesson-row')).toHaveCount(1);
+  await page.locator('.lesson-row .library-row-main').click();
   await expect(page.getByRole('heading', { name: 'How evidence changes your mind' })).toBeVisible();
   await expect(page.locator('.katex')).not.toHaveCount(0);
   await expect(page.locator('.katex-error')).toHaveCount(0);
   await expect(page.locator('figure img')).toHaveCount(1);
+  await page.locator('figure img').scrollIntoViewIfNeeded();
   await expect.poll(() => page.locator('figure img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
 });
 
@@ -27,12 +28,12 @@ test('reading position and mode survive refresh without crossing modes', async (
   await page.goto('/#lesson/bayesian-reasoning');
   await page.getByRole('tab', { name: 'Detailed walkthrough' }).click();
   await page.getByRole('button', { name: 'Set reading position at b-result', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('Position saved locally');
+  await expect(page.locator('.reading-status [role="status"]')).toHaveText('Position saved locally');
   await page.reload();
   await expect(page.locator('.active-block')).toHaveAttribute('id', 'block-b-result');
   await page.getByRole('tab', { name: 'Quick summary' }).click();
   await expect(page.locator('.active-block')).toHaveAttribute('id', 'block-b-summary');
-  await expect(page.getByRole('status')).toHaveText('Position saved locally');
+  await expect(page.locator('.reading-status [role="status"]')).toHaveText('Position saved locally');
   await page.reload();
   await expect(page.getByRole('tab', { name: 'Quick summary' })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('tab', { name: 'Detailed walkthrough' }).click();
@@ -99,4 +100,14 @@ test('mobile reader fits the viewport and diagrams can be enlarged', async ({ pa
   await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'Your library', exact: false }).first().click();
   await expect(page.getByRole('heading', { name: 'Your learning library' })).toBeVisible();
+});
+
+test('a passage opens an editable contextual tutor composer', async ({ page }) => {
+  await page.goto('/#lesson/bayesian-reasoning');
+  await page.getByRole('button', { name: 'Ask tutor' }).first().click();
+  await expect(page.getByLabel('Question for the tutor').first()).toBeVisible();
+  await page.getByLabel('Question for the tutor').first().fill('Why does this evidence change the probability?');
+  await page.getByLabel('Answer scope').first().selectOption('research');
+  await expect(page.getByText('The agent may search the web and will show citations.').first()).toBeVisible();
+  await expect(page.getByText('Voice is transcribed here first so you can edit it before sending.').first()).toBeVisible();
 });

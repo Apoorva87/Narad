@@ -6,3 +6,6 @@ data/
 .DS_Store
 .superpowers/
 artifacts/
+.playwright-mcp/
+speech/.venv/
+__pycache__/

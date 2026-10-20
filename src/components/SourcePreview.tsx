@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { PreparationPanel } from './PreparationPanel';
+import type { PreparationState } from '../../shared/preparation';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, FileText, Image, Link, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { SourceBundle } from '../../shared/sources';
 import { Markdown } from './Markdown';
 import { api } from '../lib/api';
 
-export function SourcePreview({ bundle: initialBundle, onBack }: { bundle: SourceBundle; onBack: () => void }) {
+export function SourcePreview({ bundle: initialBundle, onBack, onOpenLesson, preparation, onPreparationChanged }: { bundle: SourceBundle; onBack: () => void; onOpenLesson: (id: string) => void; preparation: PreparationState | null; onPreparationChanged: () => Promise<void> }) {
   const [bundle, setBundle] = useState(initialBundle);
+  useEffect(() => { setBundle(initialBundle); }, [initialBundle]);
   const [retrying, setRetrying] = useState(false); const [retryError, setRetryError] = useState('');
   async function retry() {
     setRetrying(true); setRetryError('');
@@ -19,7 +22,8 @@ export function SourcePreview({ bundle: initialBundle, onBack }: { bundle: Sourc
   return <div className="source-preview">
     <button className="back-link" onClick={onBack}><ArrowLeft size={16} />Back to library</button>
     <p className="intro-label">Your source collection</p><h1>{bundle.title}</h1>
-    <div className="source-stage"><CheckCircle2 size={20} /><div><strong>Sources saved · ready for review</strong><p>This is your captured source material. The tutor’s explanation has not been generated yet.</p>{bundle.sources.some(source => source.kind === 'article') && <button className="text-link" disabled={retrying} onClick={() => void retry()}>{retrying ? 'Capturing article sources…' : bundle.status === 'needs-review' ? 'Retry incomplete sources' : 'Refresh article capture'}</button>}{retryError && <p role="alert">{retryError}</p>}</div></div>
+    <div className="source-stage"><CheckCircle2 size={20} /><div><strong>{bundle.lessonId ? 'Your tutor lesson is ready' : 'Sources saved · ready for review'}</strong><p>{bundle.lessonId ? 'Open the brief summary, detailed walkthrough, or host–expert conversation.' : 'This is your captured source material. The tutor’s explanation has not been generated yet.'}</p>{bundle.lessonId && <button className="primary-button" onClick={() => onOpenLesson(bundle.lessonId!)}>Open learning modes</button>}{bundle.sources.some(source => source.kind === 'article') && <button className="text-link" disabled={retrying} onClick={() => void retry()}>{retrying ? 'Capturing article sources…' : bundle.status === 'needs-review' ? 'Retry incomplete sources' : 'Refresh article capture'}</button>}{retryError && <p role="alert">{retryError}</p>}</div></div>
+    <PreparationPanel bundleId={bundle.id} familiarity={bundle.familiarity} ready={bundle.status==='captured'} state={preparation} onChanged={onPreparationChanged} onOpenLesson={onOpenLesson} />
     <div className="source-layout"><aside className="source-picker" aria-label="Saved sources"><h2>{bundle.sources.length} saved sources</h2>{bundle.sources.map((item, i) => <button key={item.id} onClick={() => setIndex(i)} aria-current={i === index ? 'true' : undefined} className={i === index ? 'current' : ''}>{item.kind === 'image' ? <Image size={17} /> : item.kind === 'article' ? <Link size={17} /> : <FileText size={17} />}<span>{item.title}<small>{item.warnings.length ? 'Needs review' : item.kind === 'note' ? 'Your words' : item.inventory.savedVisuals + ' visuals saved'}</small></span></button>)}</aside>
       <article className="captured-article" key={source.id}>
         <div className="capture-heading"><span className="source-kind">{source.kind === 'article' ? 'Captured article' : source.kind === 'image' ? 'Uploaded image' : 'Learning intent'}</span>{source.url && <a href={source.url} target="_blank" rel="noreferrer">Visit original<ExternalLink size={14} /></a>}</div>
