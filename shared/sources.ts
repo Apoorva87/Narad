@@ -22,5 +22,5 @@ export type SourceBundle = {
   lessonId?: string; familiarity?: Familiarity;
   status: 'captured' | 'needs-review'; sources: CapturedSource[];
 };
-export type BundleSummary = Pick<SourceBundle, 'id' | 'title' | 'createdAt' | 'status' | 'lessonId'> & { sourceCount: number; visualCount: number; warningCount: number };
+export type BundleSummary = Pick<SourceBundle, 'id' | 'title' | 'createdAt' | 'status' | 'lessonId'> & { sourceCount: number; visualCount: number; warningCount: number; broken?: string };
 export type AssetBlob = { id: string; bytes: Buffer; type: string };

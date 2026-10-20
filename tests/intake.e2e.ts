@@ -18,7 +18,7 @@ test('a prepared source opens learning modes and remains linked from its origina
   await expect(page.getByText('Let’s reason through this together.')).toBeVisible();
   await page.goto('/#sources/' + bundle.id);
   await page.getByRole('button', { name: 'Open learning modes' }).click();
-  await expect(page).toHaveURL(/#lesson\/prepared-source-fixture$/);
+  await expect(page).toHaveURL(new RegExp('#lesson/' + bundle.id + '$'));
 });
 
 test('saved sources appear in navigation and match searches without accents', async ({ page, request }) => {

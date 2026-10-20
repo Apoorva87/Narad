@@ -77,10 +77,11 @@ test('presentation mode plays narration and holds the latest figure until the ne
   await expect(stage.locator('.presentation-title-card')).toBeVisible(); // No figure yet before g-figure.
   await expect(stage.locator('.presentation-status')).toContainText('Fixture speech unavailable.');
   await stage.getByRole('button', { name: 'Next passage' }).click();
-  await expect(stage.locator('.presentation-figure img')).toHaveAttribute('src', '/assets/gradient-curve.svg');
+  await expect(stage.locator('.presentation-figure img')).toHaveAttribute('src', /\/api\/library\/[a-z0-9-]+\/media\/gradient-curve\.svg$/);
   await page.keyboard.press('ArrowRight');
   await expect(stage.locator('.presentation-transcript')).toContainText(/./);
-  await expect(stage.locator('.presentation-figure img')).toHaveAttribute('src', '/assets/gradient-curve.svg');
+  await expect(stage.locator('.presentation-figure img')).toHaveAttribute('src', /\/api\/library\/[a-z0-9-]+\/media\/gradient-curve\.svg$/);
+  await expect.poll(() => stage.locator('.presentation-figure img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await page.keyboard.press('t');
   await expect(stage.locator('.presentation-transcript')).toHaveCount(0);
   await page.keyboard.press('Escape');

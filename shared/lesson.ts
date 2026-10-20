@@ -31,6 +31,8 @@ const sourceSchema = z.object({
 export function isSafeAsset(src: string) {
   return /^\/assets\/[a-zA-Z0-9_-]+\.(svg|png|webp|jpg|jpeg)$/.test(src)
     || /^\/api\/source-assets\/[a-f0-9]{64}$/.test(src)
+    // Library media: relative inside lesson.json, served form over the API.
+    || /^(\/api\/library\/[a-z0-9][a-z0-9-]{0,99}\/)?media\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/.test(src)
     || /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/]+={0,2}$/.test(src);
 }
 const assetSchema = z.object({
@@ -79,6 +81,8 @@ export type Asset = z.infer<typeof assetSchema>;
 export type Section = z.infer<typeof sectionSchema>;
 export type LessonSummary = Pick<Lesson, 'id' | 'title' | 'description' | 'topic' | 'createdAt' | 'isSample' | 'familiarity' | 'sourceBundleId'> & {
   availableModes: Mode[]; sourceCount: number; blockCount: number;
+  /** Why the item's files could not be read (for example after a hand edit). */
+  broken?: string;
 };
 export type Progress = { lastMode: Mode | null; positions: Partial<Record<Mode, string>> };
 export function parseLesson(input: unknown): Lesson { return lessonSchema.parse(input); }

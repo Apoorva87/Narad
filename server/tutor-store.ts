@@ -32,6 +32,10 @@ export class TutorStore {
     return rows.map(row => JSON.parse(row.document as string) as TutorTurn);
   }
   delete(id: string): boolean { return this.db.prepare('DELETE FROM tutor_turns WHERE id = ?').run(id).changes > 0; }
+  /** Keeps a lesson's threads when its folder is renamed. */
+  moveLesson(from: string, to: string): void {
+    this.db.prepare("UPDATE tutor_turns SET lesson_id = ?, document = json_set(document, '$.lessonId', ?) WHERE lesson_id = ?").run(to, to, from);
+  }
   deleteLesson(lessonId: string): void { this.db.prepare('DELETE FROM tutor_turns WHERE lesson_id = ?').run(lessonId); }
   close(): void { if (!this.closed) { this.db.close(); this.closed = true; } }
 }

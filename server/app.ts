@@ -7,11 +7,12 @@ import { prepareInput, renameInput } from '../shared/preparation';
 import { defaultSettings, settingsSchema, type Settings } from '../shared/settings';
 import express, { type ErrorRequestHandler } from 'express';
 import sharp from 'sharp';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { z, ZodError } from 'zod';
 import { modes, parseLesson } from '../shared/lesson';
-import { type LessonStore, StoreError } from './store';
+import { type LessonStore, StoreError, mediaType, slugPattern } from './store';
 import { prepareSources, retrySources } from './intake';
 import { allowsApiRequest, configuredWebOrigin } from './request-access';
 
@@ -52,12 +53,15 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     catch(error) { if(!controller.signal.aborted)throw error instanceof StoreError?error:new StoreError(error instanceof Error?error.message:'Could not prepare narration. Try again.',503); }
     finally {res.off('close',cancel)}
   });
+  // Every :id route accepts a folder slug or a legacy lesson/collection ID.
+  const lessonSlug = (id: string) => { const slug = store.resolveId(id); if (!slug || !store.get(slug)) throw new StoreError('Analysis not found.', 404); return slug; };
+  const bundleSlug = (id: string) => { const slug = store.resolveId(id); if (!slug || !store.getBundle(slug)) throw new StoreError('Source collection not found.', 404); return slug; };
   const tutoring = () => { if (!options.tutor) throw new StoreError('Contextual tutoring is not enabled in this server.',503); return options.tutor; };
   app.get('/api/lessons/:id/tutor', (req,res) => {
-    if (!store.get(req.params.id)) throw new StoreError('Analysis not found.',404);
-    const mode=z.enum(modes).parse(req.query.mode);res.json(tutoring().state(req.params.id,mode));
+    const slug=lessonSlug(req.params.id);
+    const mode=z.enum(modes).parse(req.query.mode);res.json(tutoring().state(slug,mode));
   });
-  app.post('/api/lessons/:id/tutor/turns', (req,res) => res.status(202).json(tutoring().start(req.params.id,tutorAskSchema.parse(req.body))));
+  app.post('/api/lessons/:id/tutor/turns', (req,res) => res.status(202).json(tutoring().start(lessonSlug(req.params.id),tutorAskSchema.parse(req.body))));
   app.post('/api/tutor/turns/:id/stop', (req,res) => res.json(tutoring().stop(req.params.id)));
   app.delete('/api/tutor/turns/:id', (req,res) => {tutoring().delete(req.params.id);res.status(204).end()});
   app.post('/api/tutor/speech/render', async(req,res)=>{
@@ -75,7 +79,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   app.post('/api/source-bundles/:id/prepare', (req, res) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before preparing a lesson.', 409);
     const { provider, familiarity } = prepareInput.parse(req.body);
-    res.status(202).json(jobs().start(req.params.id, provider, familiarity));
+    res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity));
   });
   app.post('/api/preparation/:id/stop', (req, res) => res.json(jobs().stop(req.params.id)));
   let capturing = false;
@@ -84,7 +88,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     if (capturing) throw new StoreError('Another source capture is still running. Try again when it finishes.', 409);
     capturing = true;
     try {
-      const { bundle, blobs } = await prepareSources(req.body, undefined, store.getSettings().capture); store.saveBundle(bundle, blobs);
+      const captured = await prepareSources(req.body, undefined, store.getSettings().capture); const bundle = store.saveBundle(captured.bundle, captured.blobs);
       res.status(201).json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
     } finally { capturing = false; }
   });
@@ -95,17 +99,18 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   });
   app.post('/api/source-bundles/:id/retry', async (req, res) => {
     if (capturing) throw new StoreError('Another source capture is still running. Try again when it finishes.', 409);
-    if (preparation?.state().jobs.some(job => job.bundleId === req.params.id && (job.status === 'running' || job.status === 'stopping'))) throw new StoreError('Stop preparation before refreshing its sources.', 409);
-    const previous = store.getBundle(req.params.id);
-    if (!previous) throw new StoreError('Source collection not found.', 404);
+    const slug = bundleSlug(req.params.id);
+    if (preparation?.busy(slug) || preparation?.state().jobs.some(job => job.bundleId === req.params.id && (job.status === 'running' || job.status === 'stopping'))) throw new StoreError('Stop preparation before refreshing its sources.', 409);
+    const previous = store.getBundle(slug)!;
     capturing = true;
     try {
-      const { bundle, blobs } = await retrySources(previous); store.saveBundle(bundle, blobs);
+      const retried = await retrySources(previous); const bundle = store.saveBundle(retried.bundle, retried.blobs);
       res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
     } finally { capturing = false; }
   });
   const deleteBundle = async (id: string) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before deleting.', 409);
+    id = bundleSlug(id);
     if (preparation?.busy(id)) throw new StoreError('Stop preparation before deleting these sources.', 409);
     const jobs = store.deleteBundle(id);
     await preparation?.forget(jobs);
@@ -115,22 +120,33 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
   });
   app.delete('/api/source-bundles/:id', async (req, res) => { await deleteBundle(req.params.id); res.status(204).end(); });
-  app.get('/api/source-assets/:id', (req, res) => {
-    if (!/^[a-f0-9]{64}$/.test(req.params.id)) throw new StoreError('Image not found.', 404);
-    const asset = store.getAsset(req.params.id);
-    if (!asset) throw new StoreError('Image not found.', 404);
-    res.setHeader('Content-Type', asset.type); res.setHeader('X-Content-Type-Options', 'nosniff');
+  app.get('/api/library/:slug/media/:file', (req, res) => {
+    const path = store.mediaPath(req.params.slug, req.params.file);
+    if (!path) throw new StoreError('Image not found.', 404);
+    const type = mediaType(req.params.file);
+    res.setHeader('Content-Type', type); res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-    if (asset.type === 'image/svg+xml') res.setHeader('Content-Disposition', 'attachment; filename="source.svg"');
-    res.send(Buffer.from(asset.bytes));
+    // SVGs and anything else that is not a plain raster image are served as downloads only.
+    if (!/^image\/(png|jpeg|webp|gif|avif)$/.test(type)) res.setHeader('Content-Disposition', 'attachment; filename="' + req.params.file + '"');
+    res.send(readFileSync(path));
+  });
+  app.post('/api/library/:slug/reveal', (req, res) => {
+    // Opening Finder only makes sense for someone sitting at this Mac, never through the reverse proxy.
+    let hostname = '';
+    try { hostname = new URL('http://' + req.headers.host).hostname; } catch { /* rejected below */ }
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) throw new StoreError('Show in Finder works only on the Mac running Narad.', 403);
+    const { slug } = req.params;
+    if (!slugPattern.test(slug) || store.resolveId(slug) !== slug) throw new StoreError('Library item not found.', 404);
+    if (!process.env.VITEST) execFile('open', [join(store.libraryRoot, slug)], () => {});
+    res.status(204).end();
   });
   app.get('/api/lessons', (_req, res) => res.json(store.list()));
   app.post('/api/lessons', (req, res) => {
     const lesson = parseLesson(req.body);
     for (const asset of lesson.assets) {
-      if (asset.src.startsWith('/api/source-assets/')) {
-        const saved = store.getAsset(asset.src.split('/').at(-1)!);
-        if (!saved || !/^image\/(png|jpeg|webp|gif|avif)$/.test(saved.type)) throw new StoreError('Saved image ' + asset.id + ' is missing or cannot be displayed. Use its saved raster preview.', 400);
+      const media = asset.src.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);
+      if (asset.src.startsWith('/api/source-assets/') || asset.src.startsWith('media/') || (media && (!store.mediaPath(media[1], media[2]) || !/^image\/(png|jpeg|webp|gif|avif|svg\+xml)$/.test(mediaType(media[2]))))) {
+        throw new StoreError('Saved image ' + asset.id + ' is missing or cannot be displayed. Use its saved raster preview.', 400);
       }
       if (asset.src.startsWith('/assets/') && !existsSync(resolve('public', '.' + asset.src))) {
         throw new StoreError('Image ' + asset.id + ' is missing. Embed the image as PNG, JPEG, or WebP before importing.', 400);
@@ -148,34 +164,39 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     if (!lesson) throw new StoreError('Analysis not found.', 404);
     // Saved source images live only in this library; embed them so the file imports elsewhere.
     for (const asset of lesson.assets) {
-      if (!asset.src.startsWith('/api/source-assets/')) continue;
-      const saved = store.getAsset(asset.src.split('/').at(-1)!);
-      if (!saved) continue;
-      const bytes = /^image\/(png|jpeg|webp)$/.test(saved.type) ? Buffer.from(saved.bytes) : await sharp(Buffer.from(saved.bytes)).png().toBuffer();
-      asset.src = 'data:' + (/^image\/(png|jpeg|webp)$/.test(saved.type) ? saved.type : 'image/png') + ';base64,' + bytes.toString('base64');
+      const media = asset.src.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);
+      const path = media && store.mediaPath(media[1], media[2]);
+      if (!media || !path) continue;
+      const type = mediaType(media[2]); const raster = /^image\/(png|jpeg|webp)$/.test(type);
+      const bytes = raster ? readFileSync(path) : await sharp(readFileSync(path)).png().toBuffer();
+      asset.src = 'data:' + (raster ? type : 'image/png') + ';base64,' + bytes.toString('base64');
     }
     // The source collection link is local to this library; an import elsewhere would reject it.
     res.json(parseLesson({ ...lesson, sourceBundleId: undefined }));
   });
-  app.patch('/api/lessons/:id', (req, res) => res.json(store.renameLesson(req.params.id, renameInput.parse(req.body).title)));
+  app.patch('/api/lessons/:id', (req, res) => {
+    const slug = lessonSlug(req.params.id);
+    const lesson = store.renameLesson(slug, renameInput.parse(req.body).title);
+    if (lesson.id !== slug) options.tutor?.moveLesson(slug, lesson.id);
+    res.json(lesson);
+  });
   app.delete('/api/lessons/:id', async (req, res) => {
-    const lesson = store.get(req.params.id);
-    if (!lesson) throw new StoreError('Analysis not found.', 404);
-    const bundleId = req.query.sources === 'true' && lesson.sourceBundleId && store.getBundle(lesson.sourceBundleId) ? lesson.sourceBundleId : undefined;
+    // Resolved without parsing so a hand-broken lesson can still be removed. Its sources share the folder.
+    const slug = store.resolveId(req.params.id);
+    if (!slug || !store.list().some(item => item.id === slug)) throw new StoreError('Analysis not found.', 404);
+    const bundleId = req.query.sources === 'true' && store.listBundles().some(item => item.id === slug) ? slug : undefined;
     if (bundleId && (capturing || preparation?.busy(bundleId))) throw new StoreError('Stop preparation before deleting these sources.', 409);
-    store.deleteLesson(lesson.id);
-    options.tutor?.deleteLesson(lesson.id);
+    store.deleteLesson(slug);
+    options.tutor?.deleteLesson(slug);
     if (bundleId) await deleteBundle(bundleId);
     res.status(204).end();
   });
-  app.get('/api/lessons/:id/progress', (req, res) => {
-    if (!store.get(req.params.id)) throw new StoreError('Analysis not found.', 404);
-    res.json(store.getProgress(req.params.id));
-  });
+  app.get('/api/lessons/:id/progress', (req, res) => res.json(store.getProgress(lessonSlug(req.params.id))));
   app.put('/api/lessons/:id/progress', (req, res) => {
     const { mode, blockId } = z.object({ mode: z.enum(modes), blockId: z.string().min(1) }).parse(req.body);
-    store.setProgress(req.params.id, mode, blockId);
-    res.json(store.getProgress(req.params.id));
+    const slug = lessonSlug(req.params.id);
+    store.setProgress(slug, mode, blockId);
+    res.json(store.getProgress(slug));
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
   app.use(express.static(resolve('dist')));

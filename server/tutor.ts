@@ -60,11 +60,8 @@ export class TutorService {
     for (const item of context.assets) {
       const asset = lesson.assets.find(candidate => candidate.id === item.id); if (!asset) continue;
       if (asset.src.startsWith('/assets/')) { paths.push(resolve('public', '.' + asset.src)); continue; }
-      if (asset.src.startsWith('/api/source-assets/')) {
-        const saved = this.lessons.getAsset(asset.src.split('/').at(-1)!); if (!saved) continue;
-        const path = join(dir, asset.id + ({'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp'}[saved.type] ?? '.img'));
-        await writeFile(path, saved.bytes); paths.push(path); continue;
-      }
+      const media = asset.src.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);
+      if (media) { const saved = this.lessons.mediaPath(media[1], media[2]); if (saved) paths.push(saved); continue; }
       const data = asset.src.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/);
       if (data) { const path = join(dir, asset.id + (data[1] === 'image/jpeg' ? '.jpg' : extname(data[1]) || '.png')); await writeFile(path, Buffer.from(data[2], 'base64')); paths.push(path); }
     }
@@ -111,6 +108,7 @@ export class TutorService {
     if (!this.turns.delete(id)) throw new StoreError('Tutor reply not found.', 404);
   }
   deleteLesson(lessonId: string) { this.turns.deleteLesson(lessonId); }
+  moveLesson(from: string, to: string) { this.turns.moveLesson(from, to); }
   textForSpeech(id: string, part: 'question' | 'answer'): string {
     const turn = this.turns.get(id); if (!turn) throw new StoreError('Tutor reply not found.', 404);
     if (part === 'question') return turn.question;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -76,8 +76,8 @@ export class PreparationService {
       signal.throwIfAborted();this.update(job,{stage:`Writing ${i+1}/${tasks.length} · ${task.source.title} · ${task.section.title}`});
       const images:string[]=[];
       for(const asset of task.assets){
-        const blob=this.store.getAsset(asset.src!.split('/').at(-1)!);if(!blob)throw new Error('Saved source visual is missing: '+asset.id);
-        const path=join(cwd,task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(Buffer.from(blob.bytes)).png().toBuffer());images.push(path);
+        const media=asset.src!.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);const file=media&&this.store.mediaPath(media[1],media[2]);if(!file)throw new Error('Saved source visual is missing: '+asset.id);
+        const path=join(cwd,task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(await readFile(file)).png().toBuffer());images.push(path);
       }
       const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:task.section,visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
       const instruction=prompt('section',{input:context});
@@ -99,6 +99,6 @@ export class PreparationService {
     const summary=summarySchema.parse(await run('summary','summary',prompt('summary',{sections:JSON.stringify(summaryContext)}),summarySchema));
     const lesson=compilePreparedBundle(bundle,outputs,summary.sections,'lesson-'+job.id,{limits,speakers:{host:settings.lessons.hostName,expert:settings.lessons.expertName}});signal.throwIfAborted();
     await writeFile(join(cwd,'lesson.json'),JSON.stringify(lesson,null,2));signal.throwIfAborted();
-    this.store.insert(lesson);this.update(job,{status:'completed',stage:'Lesson ready · all three modes saved',lessonId:lesson.id});
+    const saved=this.store.insert(lesson);this.update(job,{status:'completed',stage:'Lesson ready · all three modes saved',lessonId:saved.id});
   }
 }

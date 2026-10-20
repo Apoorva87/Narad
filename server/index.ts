@@ -1,7 +1,7 @@
 import { PreparationService } from './preparation';
 import { SpeechService } from './speech';
 import { LocalSpeechWorker } from './speech-worker';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createApp } from './app';
 import { LessonStore } from './store';
@@ -12,9 +12,20 @@ import samples from '../content/samples.json';
 
 const dataDir = resolve(process.env.NARAD_DATA_DIR || 'data');
 mkdirSync(dataDir, { recursive: true });
-const store = new LessonStore(resolve(dataDir, 'narad.sqlite'));
+const store = new LessonStore(resolve(dataDir, 'narad.sqlite'), resolve(dataDir, 'library'));
 const tutorStore = new TutorStore(resolve(dataDir, 'tutor.sqlite'));
-for (const sample of samples) if (!store.get(sample.id) && !store.isDeletedSample(sample.id)) store.insert(sample);
+// Samples become ordinary folders; their bundled images are copied in so each folder stands alone.
+for (const sample of samples) {
+  if (store.resolveId(sample.id) || store.isDeletedSample(sample.id)) continue;
+  const media: Record<string, Buffer> = {};
+  const assets = sample.assets.map(asset => {
+    const file = asset.src.match(/^\/assets\/([a-zA-Z0-9_-]+\.[a-z]+)$/)?.[1];
+    if (!file) return asset;
+    media[file] = readFileSync(resolve('public', 'assets', file));
+    return { ...asset, src: 'media/' + file };
+  });
+  store.insert({ ...sample, assets }, media);
+}
 const port = Number(process.env.NARAD_PORT || 4318);
 const preparation = new PreparationService(store, dataDir);
 const speech = new SpeechService(store,new LocalSpeechWorker());

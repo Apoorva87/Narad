@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -18,7 +18,8 @@ describe('mixed source intake', () => {
     const reopened = new LessonStore(path); stores.push(reopened);
     expect(reopened.getBundle(bundle.id)?.sources[0].markdown).toContain('3.14');
     expect(reopened.listBundles()[0]).toMatchObject({ title: 'My idea', sourceCount: 2, visualCount: 1 });
-    expect(Buffer.from(reopened.getAsset(blobs[0].id)!.bytes)).toEqual(png);
+    const file = reopened.getBundle(bundle.id)!.sources[1].assets[0].src!.split('/').at(-1)!;
+    expect(readFileSync(reopened.mediaPath(reopened.resolveId(bundle.id)!, file)!)).toEqual(png);
     expect(reopened.list()).toEqual([]);
   });
   it('retains unsuccessful links and distinguishes partial capture from success', async () => {

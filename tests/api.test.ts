@@ -1,10 +1,13 @@
 import { afterEach, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { get, request, type Server } from 'node:http';
 import { LessonStore } from '../server/store';
 import { createApp } from '../server/app';
 import { minimalLesson } from './fixture';
 import { prepareSources } from '../server/intake';
 import { assetBlob } from '../server/capture';
+import type { SourceBundle } from '../shared/sources';
 
 let store: LessonStore;
 let server: Server;
@@ -19,6 +22,13 @@ async function setup(webOrigin?: string) {
   const address = server.address();
   return 'http://127.0.0.1:' + (typeof address === 'object' && address ? address.port : 0);
 }
+/** Saves a one-source collection whose single visual is `bytes`; returns its slug and served image path. */
+function savedVisual(bytes: Buffer, type: string, title = 'Bundle', alt = 'Diagram') {
+  const blob = assetBlob(bytes, type);
+  const bundle: SourceBundle = { id: 'bundle', title, createdAt: new Date().toISOString(), text: '', status: 'captured', sources: [{ id: 's', title: 'S', kind: 'image', markdown: '', warnings: [], inventory: { images: 1, inlineSvg: 0, tables: 0, savedVisuals: 1 }, assets: [{ id: 'a', kind: 'image', alt, caption: '', src: '/api/source-assets/' + blob.id, originalSrc: '/api/source-assets/' + blob.id }] }] };
+  const saved = store.saveBundle(bundle, [blob]);
+  return { slug: saved.id, src: saved.sources[0].assets[0].src! };
+}
 async function requestStatus(base: string, method: string, path: string, headers: Record<string, string>, body?: string) {
   const target = new URL(base);
   return new Promise<number | undefined>((resolve, reject) => {
@@ -32,7 +42,7 @@ it('imports a lesson, lists it, preserves its content and prevents duplicate ove
   const base = await setup();
   const send = () => fetch(base + '/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(minimalLesson()) });
   expect((await send()).status).toBe(201);
-  expect(await (await fetch(base + '/api/lessons')).json()).toMatchObject([{ id: 'fixture', availableModes: ['walkthrough'] }]);
+  expect(await (await fetch(base + '/api/lessons')).json()).toMatchObject([{ id: 'a-lesson', availableModes: ['walkthrough'] }]);
   expect(await (await fetch(base + '/api/lessons/fixture')).json()).toMatchObject({ title: 'A lesson' });
   expect((await send()).status).toBe(409);
 });
@@ -53,20 +63,22 @@ it('rejects missing asset files even when the lesson references them correctly',
 it('links a prepared lesson to its captured source and validates saved visual references', async () => {
   const base = await setup();
   const { bundle } = await prepareSources({ title: 'Captured source', text: 'A source to teach.' });
-  const blob = assetBlob(Buffer.from('saved-image'), 'image/png');
-  store.saveBundle(bundle, [blob]);
+  const saved = store.saveBundle(bundle, []);
+  const { src } = savedVisual(Buffer.from('saved-image'), 'image/png', 'Other source');
   const lesson = minimalLesson(); lesson.sourceBundleId = bundle.id;
-  lesson.assets = [{ id: 'source-asset-0', src: '/api/source-assets/' + blob.id, alt: 'Source diagram', caption: 'Original diagram', provenance: 'source', kind: 'image' }];
+  lesson.assets = [{ id: 'source-asset-0', src, alt: 'Source diagram', caption: 'Original diagram', provenance: 'source', kind: 'image' }];
   const response = await fetch(base + '/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lesson) });
   expect(response.status).toBe(201);
-  expect(await (await fetch(base + '/api/source-bundles/' + bundle.id)).json()).toMatchObject({ lessonId: lesson.id });
-  expect(await (await fetch(base + '/api/source-bundles')).json()).toMatchObject([{ lessonId: lesson.id }]);
-  expect(await (await fetch(base + '/api/lessons')).json()).toMatchObject([{ sourceBundleId: bundle.id }]);
+  expect(await (await fetch(base + '/api/source-bundles/' + bundle.id)).json()).toMatchObject({ lessonId: saved.id });
+  expect(await (await fetch(base + '/api/source-bundles')).json()).toContainEqual(expect.objectContaining({ lessonId: saved.id }));
+  expect(await (await fetch(base + '/api/lessons')).json()).toMatchObject([{ sourceBundleId: saved.id }]);
+  // The image now lives in the lesson's own folder.
+  expect((await response.json()).assets[0].src).toMatch(new RegExp('^/api/library/' + saved.id + '/media/'));
 });
 it('rejects missing captured assets and nonexistent source collections', async () => {
   const base = await setup();
   const lesson = minimalLesson();
-  lesson.assets = [{ id: 'missing', src: '/api/source-assets/' + 'a'.repeat(64), alt: 'Missing', caption: 'Missing', provenance: 'source' }];
+  lesson.assets = [{ id: 'missing', src: '/api/library/nothing-here/media/01-fig-01-x.png', alt: 'Missing', caption: 'Missing', provenance: 'source' }];
   const send = () => fetch(base + '/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lesson) });
   expect((await send()).status).toBe(400);
   lesson.assets = []; lesson.sourceBundleId = 'nonexistent-source';
@@ -104,9 +116,8 @@ it('exports prepared lessons with saved source images embedded so they import on
   const base = await setup(); const lesson = minimalLesson();
   const sharp = (await import('sharp')).default;
   const gif = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'blue' } }).gif().toBuffer();
-  const blob = assetBlob(gif, 'image/gif');
-  store.saveBundle({ id: 'bundle', title: 'Bundle', createdAt: new Date().toISOString(), text: '', status: 'captured', sources: [] }, [blob]);
-  lesson.assets = [{ id: 'diagram', src: '/api/source-assets/' + blob.id, alt: 'Diagram', caption: 'Diagram', provenance: 'source', kind: 'image' }];
+  const { src } = savedVisual(gif, 'image/gif');
+  lesson.assets = [{ id: 'diagram', src, alt: 'Diagram', caption: 'Diagram', provenance: 'source', kind: 'image' }];
   lesson.sourceBundleId = 'bundle';
   store.insert(lesson);
   const exported = await (await fetch(base + '/api/lessons/fixture/export')).json();
@@ -118,8 +129,7 @@ it('exports prepared lessons with saved source images embedded so they import on
 
 it('renames and permanently deletes lessons, their sources, and unused saved images', async () => {
   const base = await setup(); const lesson = minimalLesson();
-  const blob = assetBlob(Buffer.from('only-used-here'), 'image/png');
-  store.saveBundle({ id: 'bundle', title: 'Old', createdAt: new Date().toISOString(), text: '', status: 'captured', sources: [{ id: 's', title: 'S', kind: 'image', markdown: '', warnings: [], inventory: { images: 1, inlineSvg: 0, tables: 0, savedVisuals: 1 }, assets: [{ id: 'a', kind: 'image', alt: 'A', caption: '', src: '/api/source-assets/' + blob.id }] }] }, [blob]);
+  const { slug } = savedVisual(Buffer.from('only-used-here'), 'image/png', 'Old');
   lesson.sourceBundleId = 'bundle'; store.insert(lesson); store.setProgress('fixture', 'walkthrough', 'block-a');
   const patch = (path: string, title: string) => fetch(base + path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
   expect((await (await patch('/api/lessons/fixture', 'Renamed lesson')).json()).title).toBe('Renamed lesson');
@@ -130,21 +140,23 @@ it('renames and permanently deletes lessons, their sources, and unused saved ima
   expect(store.get('fixture')).toBeUndefined();
   expect(store.getBundle('bundle')).toBeUndefined();
   expect(store.getProgress('fixture').positions).toEqual({});
-  expect(store.getAsset(blob.id)).toBeUndefined();
+  expect(store.resolveId(slug)).toBeUndefined();
+  expect(existsSync(join(store.libraryRoot, slug))).toBe(false);
   expect((await fetch(base + '/api/lessons/fixture', { method: 'DELETE' })).status).toBe(404);
 });
 it('keeps a lesson\'s images when only its source collection is deleted, and remembers deleted samples', async () => {
   await setup(); const lesson = minimalLesson();
-  const blob = assetBlob(Buffer.from('shared-image'), 'image/png');
-  store.saveBundle({ id: 'bundle', title: 'B', createdAt: new Date().toISOString(), text: '', status: 'captured', sources: [] }, [blob]);
+  const { slug, src } = savedVisual(Buffer.from('shared-image'), 'image/png', 'B');
   lesson.isSample = true; lesson.sourceBundleId = 'bundle';
-  lesson.assets = [{ id: 'diagram', src: '/api/source-assets/' + blob.id, alt: 'D', caption: 'D', provenance: 'source', kind: 'image' }];
+  lesson.assets = [{ id: 'diagram', src, alt: 'D', caption: 'D', provenance: 'source', kind: 'image' }];
   store.insert(lesson);
+  const file = src.split('/').at(-1)!;
   store.deleteBundle('bundle');
-  expect(store.getAsset(blob.id)).toBeDefined();
+  expect(store.getBundle(slug)).toBeUndefined();
+  expect(store.mediaPath(slug, file)).toBeDefined();
   store.deleteLesson('fixture');
   expect(store.isDeletedSample('fixture')).toBe(true);
-  expect(store.getAsset(blob.id)).toBeUndefined();
+  expect(store.mediaPath(slug, file)).toBeUndefined();
 });
 it('reads and partially updates settings, rejecting invalid prompts without saving', async () => {
   const base = await setup();
@@ -165,4 +177,26 @@ it('applies capture limits from settings', async () => {
   const response = await fetch(base + '/api/source-bundles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: Array.from({ length: 5 }, (_, i) => 'https://example.com/' + i).join('\n') }) });
   expect(response.status).toBe(400);
   expect((await response.json()).error).toMatch(/up to 4 links/);
+});
+it('serves library media with strict names and limits reveal to this Mac', async () => {
+  const origin = 'https://narad.example-tailnet.ts.net';
+  const base = await setup(origin);
+  const { slug, src } = savedVisual(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/svg+xml', 'Media test', 'x');
+  expect(src).toBe('/api/library/media-test/media/01-fig-01-x.svg');
+  for (const path of ['/api/library/' + slug + '/media/../../narad.sqlite', '/api/library/' + slug + '/media/%2e%2e%2fnarad.sqlite', '/api/library/' + slug + '/media/.hidden', '/api/library/Media-Test/media/01-fig-01-x.svg', '/api/library/' + slug + '/media/missing.png'])
+    expect(await requestStatus(base, 'GET', path, {}), path).toBe(404);
+  const response = await fetch(base + src);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-disposition')).toMatch(/^attachment/);
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(response.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox");
+  expect(await requestStatus(base, 'POST', '/api/library/' + slug + '/reveal', { Host: 'narad.example-tailnet.ts.net', Origin: origin, 'Sec-Fetch-Site': 'same-origin' })).toBe(403);
+  expect(await requestStatus(base, 'POST', '/api/library/' + slug + '/reveal', {})).toBe(204);
+  expect(await requestStatus(base, 'POST', '/api/library/nothing-here/reveal', {})).toBe(404);
+});
+it('resolves legacy IDs in lesson routes', async () => {
+  const base = await setup(); store.insert(minimalLesson());
+  expect((await (await fetch(base + '/api/lessons/fixture')).json()).id).toBe('a-lesson');
+  expect((await fetch(base + '/api/lessons/fixture/progress', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'walkthrough', blockId: 'block-b' }) })).status).toBe(200);
+  expect(store.getProgress('a-lesson').positions).toEqual({ walkthrough: 'block-b' });
 });
