@@ -169,7 +169,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
         {!ready ? <p role="status">Restoring your reading position…</p> : sections.map((section, index) => <section key={mode + section.id} className="lesson-section" aria-labelledby={'section-' + section.id}>
           <header className="section-heading"><span className="section-number">{String(index + 1).padStart(2, '0')}</span><div><h2 id={'section-' + section.id}>{section.title}</h2>{section.description && <p>{section.description}</p>}</div></header>
           {section.blocks.map(block => <div className="passage-with-replies" key={mode + block.id}><LessonBlock block={block} lesson={lesson} active={block.id === activeId}
-            onSelect={() => select(block.id, mode, false)} onSource={(sourceId, locator) => {tutorPlayback.stop();narration.pause();setSource({ sourceId, locator })}} />
+            onSelect={() => select(block.id, mode, false)} onSource={(sourceId, locator) => {tutorPlayback.stop();narration.pause();setSource({ sourceId, locator })}} onVideoPlay={() => {tutorPlayback.stop();narration.pause()}} />
             <ReplyThread lesson={lesson} mode={mode} sectionId={section.id} blockId={block.id} thread={tutor.threadFor(block.id)} providers={tutor.state.providers} expanded={tutor.expanded.has(block.id)} busy={!!tutor.state.activeTurnId} playback={tutorPlayback.state}
               onToggle={()=>tutor.toggle(block.id)} onBegin={()=>{const wasPlaying=['playing','loading'].includes(narration.state.status);narration.pause();tutorPlayback.stop();return wasPlaying}}
               onAsk={tutor.ask} onStop={tutor.stop} onRemove={tutor.remove} onPlay={(turn,part)=>{narration.pause();void tutorPlayback.play(turn,narration.preferences,part)}} onContinue={()=>{tutorPlayback.stop();narration.resume()}} />
@@ -195,7 +195,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
         <button className="icon-button section-nav" disabled={!ready || current.sectionIndex === sections.length - 1} onClick={() => sectionMove(1)} aria-label="Next section" title="Next section"><List size={15} /><ArrowDown size={13} /></button></div>
       </div>
     </footer>
-    {source && <SourceDialog lesson={lesson} {...source} onClose={() => setSource(null)} />}
+    {source && <SourceDialog lesson={lesson} {...source} onVideoPlay={() => {tutorPlayback.stop();narration.pause()}} onClose={() => setSource(null)} />}
     {presenting && current && <Presentation lesson={lesson} blocks={blocks} activeIndex={activeIndex} narration={{...narration,toggle:toggleNarration}} transcript={transcript} onTranscript={() => setTranscript(value => !value)} onMove={move} onExit={() => setPresenting(false)} />}
     {helpOpen && <Modal title="Shortcuts" onClose={() => setHelpOpen(false)}>
       <h3 className="shortcut-heading">Keyboard</h3><dl className="shortcut-list">{shortcuts.map(([keys, action]) => <div key={keys}><dt>{keys.split(' ').map((part, i) => /^(or|\/|·)$/.test(part) ? <span key={i}> {part} </span> : <kbd key={i}>{part}</kbd>)}</dt><dd>{action}</dd></div>)}</dl>

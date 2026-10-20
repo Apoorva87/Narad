@@ -3,10 +3,12 @@ import { BookOpen, Lightbulb, Maximize2, Bookmark } from 'lucide-react';
 import type { Lesson, LessonBlock as Block } from '../../shared/lesson';
 import { Markdown } from './Markdown';
 import { Modal } from './Modal';
+import { CreditLine } from './CreditLine';
+import { VideoEmbed } from './VideoEmbed';
 
-export function LessonBlock({ block, lesson, active, onSelect, onSource }: {
+export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideoPlay }: {
   block: Block; lesson: Lesson; active: boolean; onSelect: () => void;
-  onSource: (sourceId: string, locator?: string) => void;
+  onSource: (sourceId: string, locator?: string) => void; onVideoPlay?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -17,13 +19,15 @@ export function LessonBlock({ block, lesson, active, onSelect, onSource }: {
     {block.kind === 'dialogue' && <div className={'speaker ' + block.role}><span className="speaker-avatar">{block.speaker.charAt(0)}</span><strong>{block.speaker}</strong><span>{block.role === 'host' ? 'Curious host' : 'Your tutor'}</span></div>}
     {block.kind === 'equation' && <div className="equation"><Markdown>{'$$\n' + block.latex + '\n$$'}</Markdown></div>}
     {asset && <figure>
-      {imageFailed ? <div role="alert" className="error-box">This image could not be loaded: {asset.alt}</div>
+      {asset.kind === 'video' && asset.video ? <VideoEmbed video={asset.video} title={asset.alt} poster={asset.src} onPlay={() => onVideoPlay?.()} />
+        : imageFailed ? <div role="alert" className="error-box">This image could not be loaded: {asset.alt}</div>
         : <button className="figure-button" onClick={() => setExpanded(true)} aria-label={'Enlarge diagram: ' + asset.alt}>
           <img src={asset.src} alt={asset.alt} loading="lazy" onError={() => setImageFailed(true)} /><span className="enlarge-label"><Maximize2 size={14} /> Enlarge</span>
         </button>}
-      <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}{asset.video && <> <a className="text-link" href={asset.video.url} target="_blank" rel="noreferrer">Watch at the source ↗</a></>}</figcaption>
+      <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}</figcaption>
+      {asset.credit && <p className="figure-credit"><CreditLine credit={asset.credit} /></p>}
     </figure>}
-    <Markdown assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>
+    <Markdown onVideoPlay={onVideoPlay} assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>
     <div className="block-attribution">
       {block.references.map(ref => <button key={ref.sourceId + ref.locator} onClick={() => onSource(ref.sourceId, ref.locator)}><BookOpen size={12} />{ref.locator}</button>)}
       {block.origin === 'teaching' && <span>Added explanation</span>}

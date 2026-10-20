@@ -66,7 +66,15 @@ export default function App() {
     Promise.all([api.list(), selected && navigated ? api.lesson(selected) : Promise.resolve(null), api.bundles(), sourceId ? api.bundle(sourceId) : Promise.resolve(null)]).then(([list, document, sources, collection]) => {
       if (cancelled) return;
       setLessons(list); setBundles(sources); setBundle(collection);
-      if (navigated) { setLesson(document); shownRoute.current = route; setLoading(false); }
+      if (navigated) {
+        // An old link (by a retired id) lands on the item's folder name; the address is replaced so Back does not return to it.
+        const lessonId = document && document.id !== selected ? document.id : selected; const bundleId = collection && collection.id !== sourceId ? collection.id : sourceId;
+        if (lessonId !== selected || bundleId !== sourceId) {
+          history.replaceState(null, '', lessonId !== selected ? '#lesson/' + lessonId : '#sources/' + bundleId);
+          if (lessonId !== selected) setSelected(lessonId); else setSourceId(bundleId);
+        }
+        setLesson(document); shownRoute.current = (lessonId ?? '') + '|' + (bundleId ?? ''); setLoading(false);
+      }
     }).catch(error => { if (!cancelled && navigated) { setError(error.message || 'Could not connect to the local server.'); setLoading(false); } });
     return () => { cancelled = true; };
   }, [selected, sourceId, reload]);

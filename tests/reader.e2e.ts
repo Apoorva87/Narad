@@ -19,7 +19,7 @@ test('keyboard skip link preserves the open lesson route', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'How evidence changes your mind' })).toBeVisible();
   await page.locator('.skip-link').focus();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/#lesson\/bayesian-reasoning$/);
+  await expect(page).toHaveURL(/#lesson\/how-evidence-changes-your-mind$/);
   await expect(page.locator('#main-content')).toBeFocused();
   await expect(page.getByRole('heading', { name: 'How evidence changes your mind' })).toBeVisible();
 });

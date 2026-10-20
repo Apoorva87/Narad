@@ -132,3 +132,127 @@ test('presentation starts from the floating player without scrolling back up', a
   await player.getByRole('button', { name: 'Start presentation' }).click();
   await expect(page.getByRole('dialog', { name: /^Presenting/ })).toBeVisible();
 });
+
+function mediaLesson(id: string) {
+  const lesson = minimalLesson(); lesson.id = id; lesson.title = 'Media lesson ' + id;
+  const credit = { pageTitle: 'The Source Page', pageUrl: 'https://example.com/page', mediaUrl: 'https://example.com/pic.png', creditLine: 'Figure by A. Author', license: 'https://creativecommons.org/licenses/by/4.0/', capturedAt: '2026-10-19T12:00:00.000Z' };
+  lesson.assets = [
+    { id: 'pic', src: '/assets/bayes-tree.svg', alt: 'A tree', caption: 'A captioned tree', provenance: 'source', kind: 'image', credit },
+    { id: 'clip', src: '/assets/video-poster.svg', alt: 'A clip', caption: 'A short clip', provenance: 'source', kind: 'video', video: { provider: 'youtube', url: 'https://www.youtube.com/watch?v=abc123', embedUrl: 'https://www.youtube-nocookie.com/embed/abc123' } },
+    { id: 'hostile', src: '/assets/bayes-tree.svg', alt: 'Odd', caption: 'Odd credit', provenance: 'source', kind: 'image', credit: { ...credit, pageTitle: 'Hostile Page', pageUrl: 'javascript:alert(1)', mediaUrl: 'javascript:alert(2)', license: 'javascript:alert(3)' } },
+  ];
+  const refs = [{ sourceId: 'source-1', locator: 'section-1' }];
+  lesson.modes.walkthrough.sections[0].blocks.push(
+    { id: 'fig-a', kind: 'figure', assetId: 'pic', markdown: 'A figure.', spokenText: 'A figure.', references: refs, origin: 'source' },
+    { id: 'fig-b', kind: 'figure', assetId: 'clip', markdown: 'A clip.', spokenText: 'A clip.', references: refs, origin: 'source' },
+    { id: 'fig-c', kind: 'figure', assetId: 'hostile', markdown: 'Odd.', spokenText: 'Odd.', references: refs, origin: 'source' });
+  return lesson;
+}
+
+test('figures show their credit line and the Sources dialog lists every credit', async ({ page, request }) => {
+  expect((await request.post('/api/lessons', { data: mediaLesson('credit-lesson') })).ok()).toBe(true);
+  await page.goto('/#lesson/credit-lesson');
+  const credit = page.locator('figure .credit-line').first();
+  await expect(credit).toContainText('From The Source Page');
+  await expect(credit.getByRole('link', { name: 'The Source Page' })).toHaveAttribute('href', 'https://example.com/page');
+  await expect(credit.getByRole('link', { name: /original/ })).toHaveAttribute('href', 'https://example.com/pic.png');
+  await expect(credit).toContainText('Figure by A. Author');
+  await page.getByRole('button', { name: /1 source/ }).click();
+  await expect(page.getByRole('dialog').locator('.credit-list')).toContainText('From The Source Page');
+});
+
+test('a video streams from its source and starting it pauses narration', async ({ page, request }) => {
+  expect((await request.post('/api/lessons', { data: mediaLesson('video-lesson') })).ok()).toBe(true);
+  await page.addInitScript(() => { const Original = window.Audio; (window as any).__audio = []; window.Audio = class extends Original { constructor(src?: string) { super(src); (window as any).__audio.push(this); } }; });
+  const length = 24000 * 2 * 15; const wav = Buffer.alloc(44 + length); wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(length, 40);
+  await page.route('**/api/speech', route => route.fulfill({ json: { state: 'ready', model: 'Fixture' } }));
+  await page.route('**/api/speech/render', route => route.fulfill({ contentType: 'audio/wav', body: wav }));
+  await page.route('https://www.youtube-nocookie.com/**', route => route.fulfill({ contentType: 'text/html', body: '<button style="width:100%;height:100vh">player</button>' }));
+  await page.goto('/#lesson/video-lesson');
+  const frame = page.locator('iframe[src^="https://www.youtube-nocookie.com/embed/abc123"]');
+  await expect(frame).toHaveAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  await expect(frame).toHaveAttribute('allow', 'encrypted-media; picture-in-picture; fullscreen');
+  await expect(page.getByRole('link', { name: /Watch at the source/ }).first()).toHaveAttribute('href', 'https://www.youtube.com/watch?v=abc123');
+  await page.getByRole('button', { name: 'Play narration', exact: true }).click();
+  await expect(page.locator('.speech-state')).toContainText('Speaking');
+  await frame.scrollIntoViewIfNeeded();
+  await frame.click();
+  await expect(page.getByRole('button', { name: 'Play narration', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__audio.at(-1).paused)).toBe(true);
+});
+
+test('credit links only use http and https addresses', async ({ page, request }) => {
+  const lesson = mediaLesson('credit-safe');
+  expect((await request.post('/api/lessons', { data: lesson })).ok()).toBe(true);
+  await page.goto('/#lesson/credit-safe');
+  const unsafe = page.locator('figure .credit-line').filter({ hasText: 'Hostile Page' });
+  await expect(unsafe).toContainText('javascript:alert(3)');
+  await expect(unsafe.locator('a')).toHaveCount(0);
+});
+
+test('a broken library item shows why it cannot be opened', async ({ page }) => {
+  await page.route('**/api/lessons', async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const list = await (await route.fetch()).json();
+    await route.fulfill({ json: [...list, { id: 'broken-one', title: 'Broken one', description: '', topic: '', createdAt: '2026-10-19T12:00:00.000Z', isSample: false, familiarity: 'foundational', availableModes: [], sourceCount: 0, blockCount: 0, broken: 'lesson.json is not valid JSON' }] });
+  });
+  await page.goto('/');
+  const row = page.locator('.library-row').filter({ hasText: 'Broken one' });
+  await expect(row).toContainText('lesson.json is not valid JSON');
+  await expect(row.locator('.library-row-main')).toBeDisabled();
+});
+
+test('an old lesson link lands on the lesson address without a new history entry', async ({ page, request }) => {
+  const lesson = minimalLesson(); lesson.id = 'new-slug-lesson'; lesson.title = 'Slugged lesson';
+  expect((await request.post('/api/lessons', { data: lesson })).ok()).toBe(true);
+  await page.route('**/api/lessons/old-legacy-id', route => route.fulfill({ json: lesson }));
+  await page.goto('/');
+  const before = await page.evaluate(() => history.length);
+  await page.evaluate(() => { location.hash = 'lesson/old-legacy-id'; });
+  await expect(page.locator('.reader-heading h1')).toContainText('Slugged lesson');
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#lesson/new-slug-lesson');
+  expect(await page.evaluate(() => history.length)).toBe(before + 1);
+});
+
+test('the preparation panel lists sections and continues, restarts and reveals the folder', async ({ page, request }) => {
+  const bundle = await (await request.post('/api/source-bundles', { data: { title: 'Resumable sources', text: 'Notes only.', familiarity: 'foundational' } })).json();
+  const job = { id: bundle.id, bundleId: bundle.id, slug: bundle.id, title: bundle.title, provider: 'codex', status: 'interrupted', stage: 'Interrupted when the server stopped', completed: 1, total: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), folder: '/tmp/narad-library/' + bundle.id, error: 'Preparation was interrupted when the server stopped.',
+    sections: [{ task: 'summary-1', title: 'Opening idea', state: 'done', durationMs: 65000 }, { task: 'summary-2', title: 'Second idea', state: 'failed', error: 'Agent timed out' }] };
+  await page.route('**/api/preparation', route => route.fulfill({ json: { jobs: [job], sessions: [], providers: [{ id: 'codex', available: true }, { id: 'claude', available: true }] } }));
+  const posts: any[] = [];
+  await page.route('**/api/source-bundles/*/prepare', async route => { posts.push(route.request().postDataJSON()); await route.fulfill({ status: 202, json: job }); });
+  let revealed = '';
+  await page.route('**/api/library/*/reveal', async route => { revealed = route.request().url(); await route.fulfill({ status: 204 }); });
+  await page.goto('/#sources/' + bundle.id);
+  const panel = page.getByRole('region', { name: 'Lesson preparation' });
+  await expect(panel.locator('.section-list li')).toHaveCount(2);
+  await expect(panel.locator('.section-list li').first()).toContainText('Opening idea');
+  await expect(panel.locator('.section-list li').first()).toContainText('1m 5s');
+  await expect(panel.locator('.section-list li').nth(1)).toContainText('Agent timed out');
+  await expect(panel.locator('.folder-path')).toHaveText('/tmp/narad-library/' + bundle.id);
+  await panel.getByRole('button', { name: 'Open folder' }).click();
+  await expect.poll(() => revealed).toContain('/reveal');
+  await panel.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0].action).toBe('continue');
+  await panel.getByRole('button', { name: 'Start over', exact: true }).click();
+  await expect(panel).toContainText('Start over? Finished sections move to the runs/ archive.');
+  await panel.getByRole('button', { name: 'Cancel' }).click();
+  expect(posts.length).toBe(1);
+  await panel.getByRole('button', { name: 'Start over', exact: true }).click();
+  await panel.getByRole('button', { name: 'Confirm' }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  expect(posts[1].action).toBe('restart');
+  await panel.getByLabel('Learner level').selectOption('advanced');
+  await panel.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(panel).toContainText('Changing the level starts over. Finished sections are kept in the preparation folder’s runs/ archive.');
+  expect(posts.length).toBe(2);
+});
+
+test('presentation mode shows the credit line under the held figure', async ({ page, request }) => {
+  expect((await request.post('/api/lessons', { data: mediaLesson('credit-present') })).ok()).toBe(true);
+  await page.goto('/#lesson/credit-present');
+  await page.locator('#block-fig-a .passage-marker').click();
+  await page.getByRole('button', { name: 'Present', exact: true }).click();
+  await expect(page.locator('.presentation-figure .credit-line')).toContainText('From The Source Page');
+});

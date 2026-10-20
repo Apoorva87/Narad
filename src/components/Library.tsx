@@ -39,7 +39,7 @@ export function Library({ lessons, bundles, onOpen, onBundle, onImport, onChange
         <button className="icon-button settings-button" onClick={onSettings} aria-label="Settings" title="Settings"><Settings2 size={19} /></button></div></div>
     {filtered.length > 0 && <ul className="library-list" aria-label="Library items, newest first">
       {filtered.map(item => {
-        const lesson = item.kind === 'lesson' ? item.lesson : undefined; const bundle = item.kind === 'sources' ? item.bundle : undefined;
+        const lesson = item.kind === 'lesson' ? item.lesson : undefined; const bundle = item.kind === 'sources' ? item.bundle : undefined; const broken = lesson?.broken ?? bundle?.broken;
         const detail = lesson
           ? [lesson.isSample ? 'Sample lesson' : 'Lesson', familiarityLabels[lesson.familiarity], lesson.availableModes.length + (lesson.availableModes.length === 1 ? ' mode' : ' modes'), lesson.sourceCount + (lesson.sourceCount === 1 ? ' source' : ' sources')]
           : ['Sources', bundle!.sourceCount + (bundle!.sourceCount === 1 ? ' source' : ' sources'), bundle!.visualCount + ' visuals'];
@@ -52,11 +52,11 @@ export function Library({ lessons, bundles, onOpen, onBundle, onImport, onChange
                 <button type="button" className="icon-button" aria-label="Cancel rename" onClick={() => { setEditing(null); setRenameError(''); }}><X size={17} /></button>
                 {renameError && <p className="row-error" role="alert">{renameError}</p>}
               </form>
-            : <button className="library-row-main" onClick={() => lesson ? onOpen(item.id) : onBundle(item.id)}>
+            : <button className={'library-row-main' + (broken ? ' broken' : '')} disabled={!!broken} onClick={() => lesson ? onOpen(item.id) : onBundle(item.id)}>
                 <span className="row-icon">{lesson ? <BookOpen size={18} /> : <FolderOpen size={18} />}</span>
                 <span className="row-text"><strong>{item.title}</strong>
-                  {lesson && <span className="row-description">{lesson.description}</span>}
-                  <small>{detail.join(' · ')}<span className="row-date-inline"> · {shortDate(item.createdAt)}</span>{bundle && <em className={bundle.warningCount ? 'needs-review' : ''}>{bundle.warningCount ? bundle.warningCount + ' capture issues to review' : 'Awaiting preparation'}</em>}</small></span>
+                  {broken ? <span className="row-error" role="note">Cannot open: {broken}</span> : lesson && <span className="row-description">{lesson.description}</span>}
+                  <small>{detail.join(' · ')}<span className="row-date-inline"> · {shortDate(item.createdAt)}</span>{bundle && !broken && <em className={bundle.warningCount ? 'needs-review' : ''}>{bundle.warningCount ? bundle.warningCount + ' capture issues to review' : 'Awaiting preparation'}</em>}</small></span>
                 <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{shortDate(item.createdAt)}</time>
               </button>}
           {editing?.id !== item.id && <div className="row-actions">

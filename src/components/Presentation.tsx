@@ -4,6 +4,8 @@ import type { Lesson } from '../../shared/lesson';
 import { latestFigureIndex, type LocatedBlock } from '../../shared/navigation';
 import type { useNarration } from '../hooks/useNarration';
 import { Markdown } from './Markdown';
+import { CreditLine } from './CreditLine';
+import { VideoEmbed } from './VideoEmbed';
 
 /** Podcast-style view: narration plays while the most recent figure stays on screen until the next one. */
 export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit }: {
@@ -39,7 +41,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
   }, []);
 
   function touchStart(event: TouchEvent) {
-    if ((event.target as HTMLElement).closest('button, select, .presentation-transcript')) { touch.current = null; return; }
+    if ((event.target as HTMLElement).closest('button, select, a, .video-embed, .presentation-transcript')) { touch.current = null; return; }
     touch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY, time: Date.now() };
   }
   function touchEnd(event: TouchEvent) {
@@ -57,12 +59,12 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
     </header>
     <div className={'presentation-stage' + (transcript ? '' : ' no-transcript')}>
       {asset
-        ? <figure key={asset.id} className="presentation-figure"><img src={asset.src} alt={asset.alt} /><figcaption>{asset.caption}</figcaption></figure>
+        ? <figure key={asset.id} className="presentation-figure">{asset.kind === 'video' && asset.video ? <VideoEmbed video={asset.video} title={asset.alt} poster={asset.src} onPlay={narration.pause} /> : <img src={asset.src} alt={asset.alt} />}<figcaption>{asset.caption}</figcaption>{asset.credit && <p className="figure-credit"><CreditLine credit={asset.credit} /></p>}</figure>
         : <div key="title" className="presentation-title-card"><img src="/narad-mark.svg" alt="" /><h2>{current.section.title}</h2><p>{lesson.title}</p></div>}
       {transcript && <div className="presentation-transcript" aria-live="polite">
         {current.block.kind === 'dialogue' && <span className={'presentation-speaker ' + current.block.role}>{current.block.speaker}</span>}
         {current.block.kind === 'equation' && <Markdown>{'$$\n' + current.block.latex + '\n$$'}</Markdown>}
-        <Markdown assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>
+        <Markdown onVideoPlay={narration.pause} assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>
       </div>}
     </div>
     <footer className="presentation-controls">

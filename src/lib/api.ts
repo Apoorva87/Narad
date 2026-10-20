@@ -37,6 +37,7 @@ export const api = {
   saveSettings: (patch: object) => request<SettingsResponse>('/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
   preparation: () => request<PreparationState>('/preparation'),
   prepare: (id: string, provider: Provider, familiarity?: Familiarity, action: PrepareAction = 'continue') => request<PreparationJob>('/source-bundles/' + encodeURIComponent(id) + '/prepare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,familiarity,action})}),
+  reveal: (slug: string) => request<void>('/library/' + encodeURIComponent(slug) + '/reveal', { method: 'POST' }),
   stopPreparation: (id: string) => request<PreparationJob>('/preparation/' + encodeURIComponent(id) + '/stop', {method:'POST'}),
   bundles: () => request<BundleSummary[]>('/source-bundles'),
   bundle: (id: string) => request<SourceBundle>('/source-bundles/' + encodeURIComponent(id)),
