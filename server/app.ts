@@ -78,8 +78,8 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   app.get('/api/preparation', (_req, res) => res.json(jobs().state()));
   app.post('/api/source-bundles/:id/prepare', (req, res) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before preparing a lesson.', 409);
-    const { provider, familiarity } = prepareInput.parse(req.body);
-    res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity));
+    const { provider, familiarity, action } = prepareInput.parse(req.body);
+    res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity, action));
   });
   app.post('/api/preparation/:id/stop', (req, res) => res.json(jobs().stop(req.params.id)));
   let capturing = false;

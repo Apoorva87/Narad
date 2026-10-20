@@ -78,6 +78,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             <NumberField label="Section size (characters)" hint="Source text sent per writing call. Smaller is more focused." min={2000} max={20000} step={500} {...field('preparation', 'chunkChars')} />
             <NumberField label="Paragraphs per writing call" hint="Upper bound on paragraphs and tables per call." min={2} max={20} {...field('preparation', 'chunkUnits')} />
             <NumberField label="Time limit per call (minutes)" hint="A step that runs longer is stopped." min={2} max={60} {...field('preparation', 'timeoutMinutes')} />
+            <NumberField label="Sections at once" hint="Sections written in parallel during one preparation. Only one lesson is prepared at a time." min={1} max={4} {...field('preparation', 'sectionsAtOnce')} />
           </div>}
           {section.id === 'capture' && <div className="settings-grid">
             <NumberField label="Links found by topic research" hint="Used when a lesson starts from notes only." min={1} max={12} {...field('research', 'maxLinks')} />

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { parseLesson, type Lesson } from '../shared/lesson';
 import { isBlocking, type CapturedSource, type SourceAsset, type SourceBundle } from '../shared/sources';
@@ -31,6 +32,10 @@ export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { 
     }
   }
   return tasks;
+}
+/** Identifies a section's source: SHA-256 of its units' Markdown joined with blank lines, plus its sorted asset IDs. */
+export function sectionHash(task: TeachingTask): string {
+  return createHash('sha256').update(task.section.units.map(u=>u.markdown).join('\n\n')).update('\0').update(task.assets.map(a=>a.id).sort().join('\n')).digest('hex');
 }
 export function numericTokens(text:string):Set<string> {
   const cleaned=text.replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/https?:\/\/\S+/g,'').replace(/\\?\[\d+\\?\]/g,'').replace(/(\d),(?=\d{3})/g,'$1').replace(/^\s*`?\d+\.\s*/gm,'');

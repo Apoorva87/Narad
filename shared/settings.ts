@@ -36,7 +36,7 @@ export const settingsSchema = z.object({
   preparation: z.object({
     defaultProvider: z.enum(providers), codexModel: z.string().trim().max(80), claudeModel: z.string().trim().max(80),
     reviewRounds: z.number().int().min(1).max(5), chunkChars: z.number().int().min(2000).max(20_000), chunkUnits: z.number().int().min(2).max(20),
-    timeoutMinutes: z.number().int().min(2).max(60),
+    timeoutMinutes: z.number().int().min(2).max(60), sectionsAtOnce: z.number().int().min(1).max(4),
   }),
   lessons: z.object({ defaultLevel: z.enum(familiarities), hostName: z.string().trim().min(1).max(40), expertName: z.string().trim().min(1).max(40) }),
   voice: z.object({ narrator: z.enum(voices), host: z.enum(voices), expert: z.enum(voices), rate: z.number().min(0.5).max(2) }),
@@ -95,7 +95,7 @@ Draft:
     tutorStyle: 'Speak as a knowledgeable, patient tutor. Warm, clear, conversational delivery, with natural pauses that make the explanation easy to follow.',
   },
   research: { maxLinks: 4 },
-  preparation: { defaultProvider: 'codex', codexModel: '', claudeModel: '', reviewRounds: 2, chunkChars: 7000, chunkUnits: 8, timeoutMinutes: 12 },
+  preparation: { defaultProvider: 'codex', codexModel: '', claudeModel: '', reviewRounds: 2, chunkChars: 7000, chunkUnits: 8, timeoutMinutes: 12, sectionsAtOnce: 2 },
   lessons: { defaultLevel: 'foundational', hostName: 'Maya', expertName: 'Arun' },
   voice: { narrator: 'Ryan', host: 'Aiden', expert: 'Ryan', rate: 1 },
   capture: { maxLinks: 8, maxImages: 6 },
