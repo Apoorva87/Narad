@@ -1,6 +1,6 @@
 import type { PreparationJob } from '../shared/preparation';
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, sep } from 'node:path';
 import { z } from 'zod';
@@ -68,8 +68,13 @@ export class LessonStore {
   }
   mediaPath(slug: string, file: string): string | undefined {
     if (!slugPattern.test(slug) || !isMediaName(file)) return undefined;
-    const path = join(this.fs.dir(slug), 'media', file);
-    return existsSync(path) && statSync(path).isFile() ? path : undefined;
+    // Only a regular file inside the item folder: symlinks, or a media folder linked elsewhere, count as missing.
+    const dir = this.fs.dir(slug), path = join(dir, 'media', file);
+    try {
+      if (!lstatSync(path).isFile()) return undefined;
+      const real = realpathSync(path), root = realpathSync(dir);
+      return real.startsWith(root + sep) ? real : undefined;
+    } catch { return undefined; }
   }
 
   list(): LessonSummary[] {

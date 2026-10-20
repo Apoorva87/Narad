@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -280,4 +280,47 @@ it('does nothing, and makes no backup, when there is no legacy data', () => {
   const store = new LessonStore(join(dir, 'narad.sqlite'), join(dir, 'library')); stores.push(store);
   expect(migrateToLibrary({ dbPath: join(dir, 'narad.sqlite'), dataDir: dir, store })).toEqual({ migrated: 0, salvaged: {}, skipped: [] });
   expect(existsSync(join(dir, 'backups'))).toBe(false);
+});
+
+it.each([false, true])('salvages matching sections from every legacy run, newest job first (older run files touched last: %s)', async (touchOld) => {
+  const { dir, dbPath, store } = await fixture();
+  // A newer run of the same collection that approved only its first section, with different teaching for it.
+  const db = new DatabaseSync(dbPath);
+  db.prepare('INSERT INTO preparation_jobs (id, document, saved_at) VALUES (?, ?, ?)').run('job-c', JSON.stringify({ id: 'job-c', bundleId: SECOND, title: 'x', provider: 'claude',
+    status: 'interrupted', stage: '', completed: 1, total: 3, createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' }), 7);
+  db.close();
+  const folder = join(dir, 'preparations', 'job-c'); mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'source-snapshot.json'), JSON.stringify(secondBundle('Beta is 2 units.')));
+  writeFileSync(join(folder, 'r0-s00-p0.approved.json'), JSON.stringify({ ...teaching('s00', '1'), introduction: 'Newer introduction.' }));
+  // Touching the older run's files last makes file times wrongly rank it newest; the job's createdAt must decide.
+  const old = join(dir, 'preparations', 'job-b');
+  const later = new Date(Date.now() + 60_000);
+  if (touchOld) for (const file of readdirSync(old)) utimesSync(join(old, file), later, later);
+  const result = migrateToLibrary({ dbPath, dataDir: dir, store });
+  const slug = store.resolveId(SECOND)!;
+  expect(result.salvaged).toEqual({ [slug]: 2 });
+  const sections = join(store.libraryRoot, slug, 'preparation', 'sections');
+  expect(readdirSync(sections).sort()).toEqual(['r0-s00-p0.json', 'r0-s02-p0.json']);
+  expect(JSON.parse(readFileSync(join(sections, 'r0-s00-p0.json'), 'utf8')).teaching.introduction).toBe('Newer introduction.');
+  const progress = JSON.parse(readFileSync(join(store.libraryRoot, slug, 'preparation', 'progress.json'), 'utf8'));
+  expect(progress.runId).toBe('legacy-job-c');
+});
+
+it('keeps image credits on migrated lesson assets', async () => {
+  const { dir, dbPath, store } = await fixture();
+  migrateToLibrary({ dbPath, dataDir: dir, store });
+  const lessonJson = JSON.parse(readFileSync(join(store.libraryRoot, 'attention-paper', 'lesson.json'), 'utf8'));
+  expect(lessonJson.assets[0].credit).toMatchObject({ pageTitle: 'Attention page', pageUrl: 'https://example.com/attention', mediaUrl: 'https://example.com/chart.png' });
+});
+
+it('does not make another backup on each start while an item keeps failing', async () => {
+  const { dir, dbPath, store } = await fixture();
+  failWrites('second-topic', /^sources\//);
+  const tutorDbPath = join(dir, 'tutor.sqlite'); new TutorStore(tutorDbPath).close();
+  for (let n = 0; n < 3; n++) expect(migrateToLibrary({ dbPath, dataDir: dir, store, tutorDbPath }).skipped.some(s => s.includes('disk full'))).toBe(true);
+  expect(readdirSync(join(dir, 'backups')).sort().map(f => f.split('-')[0])).toEqual(['narad', 'tutor']);
+  vi.restoreAllMocks();
+  migrateToLibrary({ dbPath, dataDir: dir, store, tutorDbPath });
+  expect(readdirSync(join(dir, 'backups'))).toHaveLength(2);
+  expect(legacyCounts(dbPath).lessons).toBe(0);
 });

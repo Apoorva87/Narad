@@ -94,3 +94,35 @@ describe('media helpers', () => {
     }
   });
 });
+
+describe('renderCredits', () => {
+  it('lists every image, video and upload from its credit, grouped by source page, with lesson-only credits too', async () => {
+    const { renderCredits } = await import('../server/library-render');
+    const { minimalLesson } = await import('./fixture');
+    const at = '2026-10-19T00:00:00.000Z';
+    const inventory = { images: 1, inlineSvg: 0, tables: 0, savedVisuals: 1 };
+    const article = { id: 'a', title: 'Owl article', kind: 'article' as const, url: 'https://example.com/owls', markdown: '', warnings: [], inventory, assets: [
+      { id: 'i1', kind: 'image' as const, alt: 'Owl', caption: 'A barn owl', src: '/api/library/owls/media/owl-01.jpg',
+        credit: { pageTitle: 'Owl article', pageUrl: 'https://example.com/owls', mediaUrl: 'https://example.com/owl.jpg', caption: 'A barn owl', creditLine: 'Photo: Jane Doe', license: 'CC BY-SA 4.0', capturedAt: at } },
+      { id: 'v1', kind: 'video' as const, alt: 'Owl flight', caption: 'Owl in flight', video: { provider: 'youtube' as const, url: 'https://www.youtube.com/watch?v=abc', embedUrl: 'https://www.youtube-nocookie.com/embed/abc' },
+        credit: { pageTitle: 'Owl article', pageUrl: 'https://example.com/owls', mediaUrl: 'https://www.youtube.com/watch?v=abc', caption: 'Owl in flight', capturedAt: at } },
+    ] };
+    const upload = { id: 'u', title: 'My sketch', kind: 'image' as const, markdown: '', warnings: [], inventory, assets: [
+      { id: 'u1', kind: 'image' as const, alt: 'Sketch', caption: 'My sketch', src: '/api/library/owls/media/sketch.png', credit: { pageTitle: 'My sketch', pageUrl: '', creditLine: 'Your upload: My sketch', capturedAt: at } },
+    ] };
+    const lesson = { ...minimalLesson(), assets: [
+      { id: 'l1', src: 'media/owl-01.jpg', alt: 'Owl', caption: 'A barn owl', provenance: 'source', kind: 'image',
+        credit: { pageTitle: 'Owl article', pageUrl: 'https://example.com/owls', mediaUrl: 'https://example.com/owl.jpg', creditLine: 'Photo: Jane Doe', license: 'CC BY-SA 4.0', capturedAt: at } },
+      { id: 'l2', src: 'media/lesson-02.png', alt: 'Map', caption: 'Range map', provenance: 'source', kind: 'image',
+        credit: { pageTitle: 'Range atlas', pageUrl: 'https://atlas.example.org/owls', mediaUrl: 'https://atlas.example.org/map.png', creditLine: 'Map: Atlas Team', license: 'CC0', capturedAt: at } },
+    ] };
+    const md = renderCredits({ title: 'Owls', sources: [article, upload], lesson });
+    expect(md).toContain('owl-01.jpg'); expect(md).toContain('Photo: Jane Doe'); expect(md).toContain('CC BY-SA 4.0');
+    expect(md).toContain('https://example.com/owl.jpg');
+    expect(md).toContain('Owl in flight'); expect(md).toContain('https://www.youtube.com/watch?v=abc');
+    expect(md).toContain('sketch.png'); expect(md).toContain('Your upload: My sketch');
+    expect(md).toContain('## Range atlas'); expect(md).toContain('lesson-02.png'); expect(md).toContain('Map: Atlas Team'); expect(md).toContain('https://atlas.example.org/owls');
+    // The lesson's copy of a source image is not listed twice.
+    expect(md.match(/owl-01\.jpg/g)).toHaveLength(1);
+  });
+});

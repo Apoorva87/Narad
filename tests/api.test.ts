@@ -1,13 +1,14 @@
 import { afterEach, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { get, request, type Server } from 'node:http';
 import { LessonStore } from '../server/store';
 import { createApp } from '../server/app';
 import { TutorStore } from '../server/tutor-store';
 import { TutorService } from '../server/tutor';
 import type { PreparationService } from '../server/preparation';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { minimalLesson } from './fixture';
 import { prepareSources } from '../server/intake';
 import { assetBlob } from '../server/capture';
@@ -245,4 +246,23 @@ it('moves reading positions and tutor threads with either rename, and refuses re
     }
     expect(store.resolveId('blocked')).toBeUndefined();
   } finally { turns.close(); }
+});
+it('refuses library media that is a symlink, or reached through one, pointing outside the item folder', async () => {
+  const base = await setup();
+  const { slug } = savedVisual(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/svg+xml', 'Link test', 'x');
+  const media = join(store.library.dir(slug), 'media');
+  const outside = mkdtempSync(join(tmpdir(), 'narad-outside-'));
+  const secret = join(outside, 'secret.png');
+  writeFileSync(secret, 'not yours');
+  symlinkSync(secret, join(media, 'outside.png'));
+  expect(store.mediaPath(slug, 'outside.png')).toBeUndefined();
+  expect(await requestStatus(base, 'GET', '/api/library/' + slug + '/media/outside.png', {})).toBe(404);
+  // A media folder that is itself a link elsewhere is refused too.
+  const elsewhere = join(outside, 'elsewhere'); mkdirSync(elsewhere, { recursive: true });
+  writeFileSync(join(elsewhere, 'inside.png'), 'not yours');
+  const { slug: other } = savedVisual(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/svg+xml', 'Other link', 'x');
+  rmSync(join(store.library.dir(other), 'media'), { recursive: true }); symlinkSync(elsewhere, join(store.library.dir(other), 'media'));
+  expect(store.mediaPath(other, 'inside.png')).toBeUndefined();
+  expect(await requestStatus(base, 'GET', '/api/library/' + other + '/media/inside.png', {})).toBe(404);
+  rmSync(outside, { recursive: true, force: true });
 });

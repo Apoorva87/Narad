@@ -1,9 +1,9 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { parseLesson, type Lesson } from '../shared/lesson';
 import { providers, type Provider } from '../shared/preparation';
-import { legacyWarning, type AssetBlob, type CaptureWarning, type SourceAsset, type SourceBundle } from '../shared/sources';
+import { legacyWarning, type AssetBlob, type CaptureWarning, type Credit, type SourceAsset, type SourceBundle } from '../shared/sources';
 import { buildTeachingPlan, checkTeaching, sectionHash, type ChunkLimits, type TeachingTask } from './generation-content';
 import { authoredSectionSchema } from './lesson-preparation';
 import { slugify } from './library';
@@ -14,6 +14,7 @@ export type MigrationResult = { migrated: number; salvaged: Record<string, numbe
 type LegacyJob = { id: string; bundleId?: string; lessonId?: string; provider?: string; createdAt?: string };
 type LegacyBundle = Omit<SourceBundle, 'sources'> & { sources: (Omit<SourceBundle['sources'][number], 'warnings'> & { warnings: (string | CaptureWarning)[] })[] };
 /** One folder to write: a collection with its newest lesson, a collection alone, or a lesson alone. */
+type Served = { src: string; credit?: Credit };
 type Group = { bundle?: LegacyBundle; bundleDoc?: string; lesson?: Lesson };
 
 const LEGACY_TABLES = ['progress', 'lessons', 'source_bundles', 'source_assets'];
@@ -26,7 +27,8 @@ const readJson = <T>(path: string): T | undefined => { try { return JSON.parse(r
 
 /**
  * Moves content from the pre-folder SQLite tables into library folders, once.
- * - Backs up narad.sqlite (and the tutor database, when given) before any write.
+ * - Backs up narad.sqlite (and the tutor database, when given) before any write, once: a later start that retries failed items
+ *   reuses the first backup pair, which still holds every legacy row.
  * - Builds each item in a staging folder the library ignores (`_migrating-…`), checks it there, then renames it into place, so a
  *   crash never leaves a half-written item; leftover staging folders are removed on the next start.
  * - Records every placed item in `migration_done`; recorded items are never checked or written again, so later edits and deletions stand.
@@ -63,7 +65,10 @@ export function migrateToLibrary(options: { dbPath: string; dataDir: string; sto
     };
     if (!bundleRows.length && !lessonRows.length && !prepDirs.some(targetFor)) return result;
 
-    try { backup(db, dataDir, 'narad'); if (tutorDbPath && existsSync(tutorDbPath)) backupFile(tutorDbPath, dataDir, 'tutor'); }
+    // One backup pair per migration: legacy rows are never deleted until every item has migrated, so the pair an earlier start took
+    // (before it created `migration_done`) still holds everything; a start retrying failed items does not add another.
+    const backedUp = tables.has('migration_done') && existsSync(join(dataDir, 'backups')) && readdirSync(join(dataDir, 'backups')).some(file => /^narad-.+\.sqlite$/.test(file));
+    try { if (!backedUp) { backup(db, dataDir, 'narad'); if (tutorDbPath && existsSync(tutorDbPath)) backupFile(tutorDbPath, dataDir, 'tutor'); } }
     catch (error) { result.skipped.push('Backup failed, nothing was migrated: ' + message(error)); return result; }
 
     for (const row of all('preparation_jobs', 'saved_at, rowid')) { const job = parse<LegacyJob>('preparation_jobs', row); if (job) jobs.set(row.id as string, job); }
@@ -162,7 +167,7 @@ function stage(store: LessonStore, group: Group, blob: (hash: string) => AssetBl
   const staging = new LessonStore(':memory:', root);
   try {
     let slug: string | undefined;
-    let served = new Map<string, string>();
+    let served = new Map<string, Served>();
     if (group.bundle) {
       const hashes = [...new Set([...group.bundleDoc!.matchAll(/\/api\/source-assets\/([a-f0-9]{64})/g)].map(match => match[1]))];
       slug = staging.saveBundle(normaliseBundle(group.bundle), hashes.map(blob)).id;
@@ -174,7 +179,7 @@ function stage(store: LessonStore, group: Group, blob: (hash: string) => AssetBl
         const hash = asset.src.match(HASH_SRC)?.[1];
         if (!hash) return asset;
         const reused = served.get(hash);
-        if (reused) return { ...asset, src: reused };
+        if (reused) return { ...asset, src: reused.src, ...(!asset.credit && reused.credit && { credit: reused.credit }) };
         const { bytes, type } = blob(hash);
         const file = `lesson-${String(index + 1).padStart(2, '0')}.${extension(type)}`;
         media[file] = bytes;
@@ -219,13 +224,13 @@ function normaliseBundle(old: LegacyBundle): SourceBundle {
   })) };
 }
 
-/** Checks the folder reads back with the same sources and every image saved; returns old image hash → served path. */
-function verifyBundle(store: LessonStore, old: LegacyBundle, slug: string): Map<string, string> {
+/** Checks the folder reads back with the same sources and every image saved; returns old image hash → served path and credit. */
+function verifyBundle(store: LessonStore, old: LegacyBundle, slug: string): Map<string, Served> {
   const fresh = store.getBundle(slug);
   if (!fresh) throw new Error('the folder could not be read back');
   if (fresh.sources.length !== old.sources.length || fresh.sources.some((source, i) => source.markdown !== old.sources[i].markdown || source.assets.length !== old.sources[i].assets.length))
     throw new Error('the folder does not match the saved sources');
-  const served = new Map<string, string>();
+  const served = new Map<string, Served>();
   fresh.sources.forEach((source, s) => source.assets.forEach((asset, a) => {
     const before = old.sources[s].assets[a];
     for (const key of ['src', 'originalSrc'] as const) {
@@ -233,7 +238,7 @@ function verifyBundle(store: LessonStore, old: LegacyBundle, slug: string): Map<
       if (!hash) continue;
       const media = asset[key]?.match(SERVED_MEDIA);
       if (!media || !store.mediaPath(media[1], media[2])) throw new Error(`image ${asset.id} was not saved`);
-      served.set(hash, asset[key]!);
+      if (!served.has(hash)) served.set(hash, { src: asset[key]!, ...(asset.credit && { credit: asset.credit }) });
     }
   }));
   return served;
@@ -265,41 +270,49 @@ function move(from: string, parent: string, name: string): void {
 }
 
 /**
- * For a collection with no lesson and no current run: takes the newest legacy run with approved sections, imports each one whose task,
- * rebuilt from the collection as it is now, has the same source hash as the task rebuilt from the run's `source-snapshot.json`, and
- * writes `progress.json` as interrupted. Returns how many sections were imported.
+ * For a collection with no lesson and no current run: looks through every legacy run, newest job first (by the job record's
+ * `createdAt`, then folder name), and for each task rebuilt from the collection as it is now imports the first approved section
+ * whose task, rebuilt from that run's own `source-snapshot.json` and chunk limits, has the same source hash and still passes the
+ * section checks. Writes `progress.json` as interrupted. Returns how many sections were imported.
  */
 function salvage(store: LessonStore, slug: string, limits: ChunkLimits, jobs: Map<string, LegacyJob>): number {
   const dir = store.library.dir(slug);
   const prep = join(dir, 'preparation'), runs = join(prep, 'runs');
   if (existsSync(join(dir, 'lesson.json')) || existsSync(join(prep, 'progress.json')) || existsSync(join(prep, 'sections')) || !existsSync(runs)) return 0;
-  const approved = (folder: string) => readdirSync(join(runs, folder)).filter(file => file.endsWith('.approved.json'));
-  const newest = (folder: string) => Math.max(...approved(folder).map(file => statSync(join(runs, folder, file)).mtimeMs));
-  const candidates = readdirSync(runs).filter(folder => folder.startsWith('legacy-') && existsSync(join(runs, folder, 'source-snapshot.json')) && approved(folder).length)
-    .sort((a, b) => newest(b) - newest(a));
-  const run = candidates[0];
-  if (!run) return 0;
+  const created = (folder: string) => { const at = Date.parse(jobs.get(folder.slice('legacy-'.length))?.createdAt ?? ''); return Number.isNaN(at) ? -Infinity : at; };
+  const candidates = readdirSync(runs).filter(folder => folder.startsWith('legacy-') && existsSync(join(runs, folder, 'source-snapshot.json')))
+    .sort((a, b) => created(b) - created(a) || (b < a ? -1 : b > a ? 1 : 0));
+  if (!candidates.length) return 0;
   const bundle = store.getBundle(slug)!;
-  const snapshot = readJson<LegacyBundle>(join(runs, run, 'source-snapshot.json'));
-  if (!snapshot) return 0;
-  // The old run split its sources with the chunk limits in force then; current tasks use today's limits, as Continue will.
-  const used = readJson<{ preparation?: Partial<ChunkLimits> }>(join(runs, run, 'settings.json'))?.preparation;
-  const runLimits: ChunkLimits = { chunkChars: used?.chunkChars ?? limits.chunkChars, chunkUnits: used?.chunkUnits ?? limits.chunkUnits };
-  let current: TeachingTask[], before: TeachingTask[];
-  try { current = buildTeachingPlan(bundle, limits); before = buildTeachingPlan(normaliseBundle(snapshot), runLimits); }
-  catch { return 0; }
+  let current: TeachingTask[];
+  try { current = buildTeachingPlan(bundle, limits); } catch { return 0; }
+  // Each old run split its sources with the chunk limits in force then; current tasks use today's limits, as Continue will.
+  const plans = candidates.flatMap(run => {
+    const snapshot = readJson<LegacyBundle>(join(runs, run, 'source-snapshot.json'));
+    if (!snapshot) return [];
+    const used = readJson<{ preparation?: Partial<ChunkLimits> }>(join(runs, run, 'settings.json'))?.preparation;
+    const runLimits: ChunkLimits = { chunkChars: used?.chunkChars ?? limits.chunkChars, chunkUnits: used?.chunkUnits ?? limits.chunkUnits };
+    try { return [{ run, before: buildTeachingPlan(normaliseBundle(snapshot), runLimits) }]; } catch { return []; }
+  });
 
   const sections: Progress['sections'] = {};
   let count = 0;
+  const contributed = new Set<string>();
   for (const task of current) {
     const hash = sectionHash(task);
-    const old = before.find(candidate => candidate.id === task.id);
-    const parsed = old && sectionHash(old) === hash ? authoredSectionSchema.safeParse(readJson(join(runs, run, task.id + '.approved.json'))) : undefined;
-    const teaching = parsed?.success && !checkTeaching(task, parsed.data).length ? parsed.data : undefined;
+    let teaching: ReturnType<typeof authoredSectionSchema.parse> | undefined;
+    for (const { run, before } of plans) {
+      const old = before.find(candidate => candidate.id === task.id);
+      if (!old || sectionHash(old) !== hash) continue;
+      const parsed = authoredSectionSchema.safeParse(readJson(join(runs, run, task.id + '.approved.json')));
+      if (parsed.success && !checkTeaching(task, parsed.data).length) { teaching = parsed.data; contributed.add(run); break; }
+    }
     if (teaching) { store.library.writeJson(slug, `preparation/sections/${task.id}.json`, { task: task.id, title: task.section.title, sourceHash: hash, teaching }); count++; }
     sections[task.id] = { title: task.section.title, sourceHash: hash, state: teaching ? 'done' : 'waiting', attempts: 0 };
   }
   if (!count) return 0;
+  // The newest run that gave a section names the resumed run.
+  const run = plans.find(candidate => contributed.has(candidate.run))!.run;
   const job = jobs.get(run.slice('legacy-'.length));
   const provider: Provider = providers.includes(job?.provider as Provider) ? job!.provider as Provider : 'codex';
   const now = new Date().toISOString();
