@@ -16,11 +16,16 @@ describe('settings', () => {
     expect(settingsSchema.safeParse(tooMany).success).toBe(false);
   });
   it('stores only changed values and ignores stale saved keys', () => {
-    const changed = structuredClone(defaultSettings); changed.voice.host = 'Vivian'; changed.preparation.reviewRounds = 3;
-    expect(settingsOverrides(changed)).toEqual({ voice: { host: 'Vivian' }, preparation: { reviewRounds: 3 } });
+    const changed = structuredClone(defaultSettings); changed.voice.host = 'Vivian';
+    expect(settingsOverrides(changed)).toEqual({ voice: { host: 'Vivian' } });
     expect(resolveSettings({ voice: { host: 'Vivian', retired: true }, gone: { x: 1 } }).voice.host).toBe('Vivian');
     const store = new LessonStore(':memory:');
-    try { expect(store.saveSettings(changed).preparation.reviewRounds).toBe(3); expect(store.getSettings().voice.host).toBe('Vivian'); }
+    try { expect('reviewRounds' in store.saveSettings(changed).preparation).toBe(false); expect(store.getSettings().voice.host).toBe('Vivian'); }
     finally { store.close(); }
+  });
+  it('does not impose dialogue-length or revision-count limits', () => {
+    expect('reviewRounds' in defaultSettings.preparation).toBe(false);
+    expect(defaultSettings.prompts.visualGuidance).not.toMatch(/2[–-]12|maximum.*turn/i);
+    expect(defaultSettings.prompts.visualGuidance).toMatch(/as many.*turns.*needed/i);
   });
 });

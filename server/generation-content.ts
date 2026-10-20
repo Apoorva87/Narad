@@ -65,12 +65,12 @@ export function reconcileReviewIssues(teaching:AuthoredSection,issues:string[]):
   return issues.flatMap(issue=>{
     let disprovedCount=false;
     return issue.split(/(?<=[.!?])\s+|;\s*/).map(clause=>clause.trim()).filter(clause=>{
-      const countClaim=clause.match(/^Visual\s+([A-Za-z0-9._-]+)\s+has\s+\d+\s+dialogue turns?,?\s+(?:(?:which|and)\s+)?(?:exceed(?:s|ing)?|is\s+(?:over|above))\s+(?:the\s+)?(?:required\s+)?maximum(?:\s+of)?\s+12(?:\s+per\s+visual)?[.!?]?$/i);
+      const countClaim=clause.match(/^Visual\s+([A-Za-z0-9._-]+)\s+has\s+\d+\s+dialogue turns?,?\s+(?:(?:which|and)\s+)?(?:exceed(?:s|ing)?|is\s+(?:over|above))\s+(?:the\s+)?(?:required\s+)?maximum(?:\s+of)?\s+\d+(?:\s+per\s+visual)?[.!?]?$/i);
       if(countClaim){
-        const turns=teaching.visuals.find(visual=>visual.id===countClaim[1])?.dialogueTurns;
-        if(turns&&turns.length<=12){disprovedCount=true;return false}
+        const visual=teaching.visuals.find(item=>item.id===countClaim[1]);
+        if(visual?.dialogueTurns){disprovedCount=true;return false}
       }
-      if(disprovedCount&&/^(?:merge|combine|reduce|shorten|trim)\b.*\b(?:12|twelve)\s+or\s+fewer\s+(?:dialogue\s+)?turns?\b/i.test(clause))return false;
+      if(disprovedCount&&/^(?:merge|combine|reduce|shorten|trim)\b.*\b\d+\s+or\s+fewer\s+(?:dialogue\s+)?turns?\b/i.test(clause))return false;
       return true;
     });
   });

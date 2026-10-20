@@ -21,14 +21,14 @@ test('settings open from the library, validate prompts, save, and reset', async 
 
   await page.getByLabel('Detailed walkthrough', { exact: true }).fill('Explain like a careful textbook. Keep every source number.');
   await page.getByLabel('Host voice', { exact: true }).selectOption('Vivian');
-  await page.getByLabel('Review rounds per section', { exact: true }).fill('3');
+  await expect(page.getByLabel('Review rounds per section', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Settings saved. They apply to your next preparation.')).toBeVisible();
 
   const saved = (await (await request.get('/api/settings')).json()).settings;
   expect(saved.prompts.walkthroughGuidance).toBe('Explain like a careful textbook. Keep every source number.');
   expect(saved.voice.host).toBe('Vivian');
-  expect(saved.preparation.reviewRounds).toBe(3);
+  expect('reviewRounds' in saved.preparation).toBe(false);
 
   await page.reload();
   await expect(page.getByLabel('Host voice', { exact: true })).toHaveValue('Vivian');

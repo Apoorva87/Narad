@@ -4,7 +4,7 @@
 
 **Goal:** Prevent false structural review failures, reuse compatible approved analysis sections after API or container restarts, and provide a local development launcher with the same lifecycle commands as the Docker launcher.
 
-**Architecture:** Deterministic TypeScript validation remains authoritative for JSON structure and visual dialogue counts; model review remains authoritative for semantic fidelity. Preparation retries scan prior jobs for approved sections and reuse only sections whose source-derived hash matches the current teaching task. `start_local.sh` supervises the existing `npm run dev` process through a small Node process-group wrapper and keeps PID/log state under `.narad/`.
+**Architecture:** Deterministic TypeScript validation remains authoritative for JSON structure and required host/expert participation; model review remains authoritative for semantic fidelity and completeness. Visual dialogue length and revision count are driven by the material rather than fixed ceilings. Preparation retries scan prior jobs for approved sections and reuse only sections whose source-derived hash matches the current teaching task. `start_local.sh` supervises the existing `npm run dev` process through a small Node process-group wrapper and keeps PID/log state under `.narad/`.
 
 **Tech Stack:** Bash, Node.js 24+, TypeScript, Zod, Vitest, existing Codex/Claude CLI runners.
 
@@ -16,12 +16,13 @@
 - Do not automatically resume provider calls after startup; the user explicitly starts a retry.
 - Reuse an approved section only when its current source/task hash matches the saved task hash.
 - Do not weaken semantic review or suppress factual, attribution, label, quantity, or caveat feedback.
+- Do not impose fixed dialogue-turn or review-round ceilings; continue until approval or explicit cancellation.
 - Local development uses host Codex/Claude credentials and the existing local speech worker; Docker credentials remain isolated in the Docker volume.
 - Do not commit unless the user asks.
 
 ## Review Focus
 
-1. Reviewer reports 14 visual turns when parsed draft has 12 → ignore only that contradicted structural issue and accept the otherwise valid section.
+1. Reviewer invents a fixed visual-turn ceiling → ignore only that structural issue and accept the otherwise valid section regardless of the dialogue's content-driven length.
 2. Reviewer reports a real semantic visual issue alongside a false turn-count issue → retain the semantic issue and require revision.
 3. Previous approved section exists but source text or asset identity changed → regenerate it.
 4. API/container restarts after one section completed → a manually started retry reuses the completed section and begins with the first unfinished section.

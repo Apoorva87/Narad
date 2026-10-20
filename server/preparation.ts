@@ -20,6 +20,10 @@ function promptKit(settings:Settings,level:Familiarity){
   const shared={principles,walkthroughGuidance:p.walkthroughGuidance,dialogueGuidance:p.dialogueGuidance,visualGuidance:p.visualGuidance,maxLinks:String(settings.research.maxLinks)};
   return (key:'research'|'section'|'revision'|'review'|'summary',values:Record<string,unknown>)=>renderPrompt(p[key],{...shared,...Object.fromEntries(Object.entries(values).map(([name,value])=>[name,untrustedData(name,value)]))});
 }
+function progressIssue(issues:string[]):string{
+  const text=issues[0]?.replace(/\s+/g,' ').trim()??'Improving the draft.';
+  return text.length>180?text.slice(0,177)+'…':text;
+}
 export class PreparationService {
   private active?:{job:PreparationJob;controller:AbortController;done:Promise<void>};
   private sessions:PreparationState['sessions']=[];
@@ -92,7 +96,7 @@ export class PreparationService {
     const reusable=await this.reusableSections(job,bundle,tasks);
     const outputs:TeachingOutput[]=[];
     for(const [i,task]of tasks.entries()){
-      signal.throwIfAborted();this.update(job,{stage:`Writing ${i+1}/${tasks.length} · ${task.source.title} · ${task.section.title}`});
+      signal.throwIfAborted();
       const reused=reusable.get(task.id);if(reused){outputs.push({task,teaching:reused});await writeFile(join(cwd,task.id+'.approved.json'),JSON.stringify(reused,null,2));this.update(job,{completed:i+1,stage:`Reused ${i+1}/${tasks.length} · ${task.section.title}`});continue}
       const images:string[]=[];
       for(const asset of task.assets){
@@ -102,17 +106,19 @@ export class PreparationService {
       const context={learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:task.section,visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)};
       const instruction=prompt('section',{input:context});
       let teaching:TeachingOutput['teaching']|undefined;let issues:string[]=[];
-      for(let attempt=0;attempt<settings.preparation.reviewRounds;attempt++){
+      for(let attempt=0;;attempt++){
+        const draftNumber=attempt+1;
+        this.update(job,{stage:issues.length?`Revising ${i+1}/${tasks.length} · draft ${draftNumber} · ${progressIssue(issues)}`:`Writing ${i+1}/${tasks.length} · draft ${draftNumber} · ${task.section.title}`});
         const raw=await run('author',task.id+'-draft-'+attempt,instruction+(issues.length?'\n'+prompt('revision',{issues,draft:teaching}):''),agentSectionSchema,images);
         const structured=agentSectionSchema.parse(raw);teaching=authoredSectionSchema.parse({...structured,units:structured.units.map(u=>({...u,question:u.question??undefined}))});
         issues=checkTeaching(task,teaching);if(issues.length)continue;
-        this.update(job,{stage:`Checking ${i+1}/${tasks.length} · ${task.section.title}`});
+        this.update(job,{stage:`Reviewing ${i+1}/${tasks.length} · draft ${draftNumber} · ${task.section.title}`});
         const review=reviewSchema.parse(await run('review',task.id+'-review-'+attempt,prompt('review',{source:context,draft:teaching}),reviewSchema,images));
         const reviewIssues=reconcileReviewIssues(teaching,review.issues);
         issues=reviewIssues.length?reviewIssues:review.issues.length?[]:review.approved?[]:['Content review did not approve this section.'];
         if(!issues.length)break;
       }
-      if(issues.length||!teaching)throw new Error('Section '+task.section.title+' needs review: '+issues.join('; '));
+      if(!teaching)throw new Error('Section '+task.section.title+' did not produce a draft.');
       outputs.push({task,teaching});await writeFile(join(cwd,task.id+'.approved.json'),JSON.stringify(teaching,null,2));this.update(job,{completed:i+1});
     }
     signal.throwIfAborted();this.update(job,{stage:'Preparing the brief summary and synthesis'});

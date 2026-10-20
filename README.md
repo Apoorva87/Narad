@@ -99,7 +99,7 @@ For container debugging, follow service output or open a read-only-root shell:
     docker exec -it narad-api-1 sh
     docker exec -it narad-agent-1 sh
 
-Preparation prompts, structured results, and provider event logs are also visible directly on the Mac under `data/preparations/<job-id>/`. After an interrupted or failed run, starting preparation again reuses compatible approved sections from earlier failed, interrupted, or cancelled jobs. It never resumes provider calls automatically after startup, and it regenerates a saved section when its source content, visual identity, or learner familiarity changed.
+Preparation prompts, structured results, and provider event logs are also visible directly on the Mac under `data/preparations/<job-id>/`. Narad does not impose a dialogue-turn or review-round ceiling: it revises each section until deterministic validation and semantic review approve it, while the live status reports the draft number and current issue so you can stop the preparation at any time. After an interrupted, stopped, or failed run, starting preparation again reuses compatible approved sections. It never resumes provider calls automatically after startup, and it regenerates a saved section when its source content, visual identity, or learner familiarity changed.
 
 Docker Desktop does not expose the Mac Metal GPU to Linux containers, so Qwen3-TTS stays on macOS. The API reaches it through `host.docker.internal` with a generated token and continues returning WAV chunks ephemerally. Do not publish port 4321 through a router or tunnel.
 

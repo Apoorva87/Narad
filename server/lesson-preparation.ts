@@ -6,7 +6,7 @@ const prose = z.string().trim().min(1);
 export const authoredSectionSchema = z.object({
   id: prose, introduction: prose, hostQuestion: prose,
   units: z.array(z.object({ id: prose, walkthrough: prose, walkthroughSpoken: prose, dialogue: prose, dialogueSpoken: prose, question: prose.optional() })),
-  visuals: z.array(z.object({ id: prose, caption: prose, explanation: prose, spokenText: prose, dialogueTurns: z.array(z.object({ role: z.enum(['host', 'expert']), markdown: prose, spokenText: prose })).min(2).max(12).optional() })),
+  visuals: z.array(z.object({ id: prose, caption: prose, explanation: prose, spokenText: prose, dialogueTurns: z.array(z.object({ role: z.enum(['host', 'expert']), markdown: prose, spokenText: prose })).min(2).optional() })),
 });
 export type AuthoredSection = z.infer<typeof authoredSectionSchema>;
 export type SourceUnit = { id: string; kind: 'text' | 'table' | 'figure'; markdown: string; assetIds: string[] };
