@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
-import { resolve, sep } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { dirname, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z, ZodError } from 'zod';
 import { cliRunner, type AgentRequest, type AgentRunner } from './agent-runner';
@@ -44,7 +45,10 @@ class AgentServiceError extends Error{constructor(message:string,readonly status
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const token=process.env.NARAD_AGENT_TOKEN;if(!token)throw new Error('NARAD_AGENT_TOKEN is required.');
   const roots=(process.env.NARAD_AGENT_ROOTS??'/data/preparations,/data/tutor').split(',').filter(Boolean);
-  const port=Number(process.env.NARAD_AGENT_PORT??4320),host=process.env.NARAD_AGENT_BIND_HOST??'0.0.0.0';
-  const server=createAgentService(cliRunner,token,roots).listen(port,host,()=>console.log(`Narad agent service: http://${host}:${port}`));
-  const stop=()=>server.close(()=>process.exit(0));process.on('SIGINT',stop);process.on('SIGTERM',stop);
+  const socket=process.env.NARAD_AGENT_SOCKET;
+  if(socket){mkdirSync(dirname(socket),{recursive:true});if(existsSync(socket))unlinkSync(socket)}
+  const port=Number(process.env.NARAD_AGENT_PORT??4320),host=process.env.NARAD_AGENT_BIND_HOST??'127.0.0.1';
+  const ready=()=>{if(socket)chmodSync(socket,0o660);console.log(socket?`Narad agent service: unix:${socket}`:`Narad agent service: http://${host}:${port}`)};
+  const server=socket?createAgentService(cliRunner,token,roots).listen(socket,ready):createAgentService(cliRunner,token,roots).listen(port,host,ready);
+  const stop=()=>server.close(()=>{if(socket&&existsSync(socket))unlinkSync(socket);process.exit(0)});process.on('SIGINT',stop);process.on('SIGTERM',stop);
 }

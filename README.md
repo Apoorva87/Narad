@@ -67,6 +67,8 @@ Authenticate each provider once inside the private `agent-home` Docker volume:
     ./start.sh login codex
     ./start.sh login claude
 
+Codex uses its device-code flow. Claude creates a long-lived subscription token. Follow the URL and code printed by each command; neither flow relies on a browser callback inside the container.
+
 Then manage the complete service with:
 
     ./start.sh start
@@ -76,7 +78,7 @@ Then manage the complete service with:
 
 Open http://127.0.0.1:4318/ after `start` reports the API ready. `start` builds two Linux images, starts the internal agent service and public loopback API, and launches the macOS MLX host on port 4321. Private bearer tokens are generated under ignored `.narad/`; they are never printed by `status`.
 
-The API container mounts `./data`. The agent container mounts only `./data/preparations`, `./data/tutor`, and its private named home volume. It does not receive the host home directory, Narad SQLite files, or the Docker socket. Both containers use a read-only root filesystem, dropped Linux capabilities, `no-new-privileges`, PID limits, and temporary `/tmp` filesystems. Provider authentication remains in the `agent-home` Docker volume when containers restart; `./start.sh kill` does not delete it.
+The API container mounts `./data`. The agent container mounts only `./data/preparations`, `./data/tutor`, a narrow Unix control socket, and its private named home volume. The two containers use separate Docker service networks, and the API is published only on the host loopback interface. The agent does not receive the host home directory, Narad SQLite files, TTS URL or token, or Docker socket. Both containers run as the invoking host user's numeric UID, use a read-only root filesystem, drop Linux capabilities, set `no-new-privileges`, limit PIDs, and use temporary `/tmp` filesystems. Provider authentication remains in the `agent-home` Docker volume when containers restart; `./start.sh kill` does not delete it.
 
 The agent can intentionally write prompts, logs, source-image copies, and structured results inside its two mounted job directories. It cannot use those mounts to reach other host files. To remove credentials as well as containers, explicitly remove the `narad_agent-home` volume after stopping Narad.
 

@@ -47,6 +47,9 @@ NARAD_AGENT_TOKEN=$(random_token)
 NARAD_TTS_TOKEN=$(random_token)
 EOF
   fi
+  if ! grep -q '^NARAD_UID=' "$env_file"; then
+    printf 'NARAD_UID=%s\n' "$(id -u)" >>"$env_file"
+  fi
   set -a
   # shellcheck disable=SC1090
   source "$env_file"
@@ -59,9 +62,13 @@ compose() {
 
 tts_running() {
   [[ -f "$tts_pid_file" ]] || return 1
-  local pid
-  pid="$(cat "$tts_pid_file")"
-  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+  local pid recorded_start current_start command
+  pid="$(sed -n '1p' "$tts_pid_file")"
+  recorded_start="$(sed -n '2p' "$tts_pid_file")"
+  [[ "$pid" =~ ^[0-9]+$ ]] && [[ -n "$recorded_start" ]] && kill -0 "$pid" 2>/dev/null || return 1
+  current_start="$(ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  command="$(ps -p "$pid" -o command= 2>/dev/null)"
+  [[ "$current_start" == "$recorded_start" && "$command" == *"$project_dir/server/tts-host.ts"* ]]
 }
 
 start_tts() {
@@ -76,9 +83,11 @@ start_tts() {
     return 1
   fi
   NARAD_TTS_TOKEN="$NARAD_TTS_TOKEN" NARAD_TTS_BIND_HOST=0.0.0.0 NARAD_TTS_PORT=4321 \
-    nohup node_modules/.bin/tsx server/tts-host.ts >>"$tts_log_file" 2>&1 &
+    nohup "$project_dir/node_modules/.bin/tsx" "$project_dir/server/tts-host.ts" >>"$tts_log_file" 2>&1 &
   local pid=$!
-  echo "$pid" >"$tts_pid_file"
+  local process_start
+  process_start="$(ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  printf '%s\n%s\n' "$pid" "$process_start" >"$tts_pid_file"
   for _ in {1..40}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       echo "The macOS TTS host stopped during startup. See $tts_log_file" >&2
@@ -94,7 +103,7 @@ start_tts() {
 stop_tts() {
   if ! tts_running; then rm -f "$tts_pid_file"; return 0; fi
   local pid
-  pid="$(cat "$tts_pid_file")"
+  pid="$(sed -n '1p' "$tts_pid_file")"
   kill "$pid" 2>/dev/null || true
   for _ in {1..20}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
@@ -108,7 +117,7 @@ show_status() {
   else echo "  Docker Compose or runtime configuration is not available."
   fi
   echo
-  if tts_running; then echo "macOS TTS: running (PID $(cat "$tts_pid_file"))"
+  if tts_running; then echo "macOS TTS: running (PID $(sed -n '1p' "$tts_pid_file"))"
   else echo "macOS TTS: stopped"
   fi
   if curl -fsS http://127.0.0.1:${NARAD_PORT:-4318}/api/health >/dev/null 2>&1; then echo "Narad API: ready at http://127.0.0.1:${NARAD_PORT:-4318}"
@@ -134,8 +143,8 @@ login_provider() {
   [[ "$provider" == codex || "$provider" == claude ]] || { usage; return 2; }
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { echo "The Docker daemon is not running." >&2; return 1; }
   find_compose;ensure_runtime
-  if [[ "$provider" == codex ]]; then compose run --rm --entrypoint codex agent login
-  else compose run --rm --entrypoint claude agent
+  if [[ "$provider" == codex ]]; then compose run --rm --entrypoint codex agent login --device-auth
+  else compose run --rm --entrypoint claude agent setup-token
   fi
 }
 
