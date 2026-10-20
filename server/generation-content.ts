@@ -61,6 +61,20 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   if(teaching.visuals.some(v=>!task.assets.some(a=>a.id===v.id)) || new Set(teaching.visuals.map(v=>v.id)).size!==teaching.visuals.length) issues.push('Unexpected or duplicate visual IDs');
   return issues;
 }
+export function reconcileReviewIssues(teaching:AuthoredSection,issues:string[]):string[] {
+  return issues.flatMap(issue=>{
+    let disprovedCount=false;
+    return issue.split(/(?<=[.!?])\s+|;\s*/).map(clause=>clause.trim()).filter(clause=>{
+      const countClaim=clause.match(/^Visual\s+([A-Za-z0-9._-]+)\s+has\s+\d+\s+dialogue turns?,?\s+(?:(?:which|and)\s+)?(?:exceed(?:s|ing)?|is\s+(?:over|above))\s+(?:the\s+)?(?:required\s+)?maximum(?:\s+of)?\s+12(?:\s+per\s+visual)?[.!?]?$/i);
+      if(countClaim){
+        const turns=teaching.visuals.find(visual=>visual.id===countClaim[1])?.dialogueTurns;
+        if(turns&&turns.length<=12){disprovedCount=true;return false}
+      }
+      if(disprovedCount&&/^(?:merge|combine|reduce|shorten|trim)\b.*\b(?:12|twelve)\s+or\s+fewer\s+(?:dialogue\s+)?turns?\b/i.test(clause))return false;
+      return true;
+    });
+  });
+}
 /** A plain-text card description from the synthesis: no Markdown or math syntax, cut at a sentence. */
 export function excerpt(markdown:string,limit=240):string {
   const text=markdown.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]*\$/g,'').replace(/!?\[([^\]]*)\]\([^)]*\)/g,'$1').replace(/[*_`#>|]/g,'').replace(/\s+/g,' ').trim();

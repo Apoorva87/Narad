@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Provider, PreparationState, AgentUsage } from '../shared/preparation';
+import { hasFixedPromptPolicy } from './prompt-security';
 export type { AgentUsage };
 export type AgentRequest = { provider:Provider; kind:'author'|'review'|'summary'|'research'|'tutor'; prompt:string; schema:Record<string,unknown>; cwd:string; name:string; images:string[]; model?:string; timeoutMs?:number; research?:boolean };
 export type AgentRunner = {run:(request:AgentRequest,signal:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(usage:AgentUsage)=>void)=>Promise<unknown>; available:()=>PreparationState['providers']};
@@ -30,7 +31,8 @@ export function codexUsage(stdout:string):AgentUsage|undefined {
 export function executeProcess(options:{command:string;args:string[];cwd:string;input:string;signal:AbortSignal;timeoutMs:number;maxBytes?:number;onSession?:(pid:number|null)=>void;onOutput?:(text:string)=>void}):Promise<{stdout:string;stderr:string}> {
   return new Promise((resolve,reject)=>{
     if(options.signal.aborted) {reject(new Error('Preparation cancelled.'));return;}
-    const host=fork(fileURLToPath(new URL('./cli-host.mjs',import.meta.url)),[],{cwd:options.cwd,detached:true,silent:true,execArgv:[]});
+    const environment={...process.env};delete environment.NARAD_AGENT_TOKEN;delete environment.NARAD_TTS_TOKEN;
+    const host=fork(fileURLToPath(new URL('./cli-host.mjs',import.meta.url)),[],{cwd:options.cwd,detached:true,silent:true,execArgv:[],env:environment});
     let stdout='';let stderr='';let bytes=0;let failure:Error|undefined;let exitCode:number|undefined;let escalation:ReturnType<typeof setTimeout>|undefined;
     const kill=(signal:NodeJS.Signals)=>{if(host.pid)try{process.kill(-host.pid,signal)}catch{/* already closed */}};
     const stop=(reason:string)=>{if(failure)return;failure=new Error(reason);kill('SIGTERM');escalation=setTimeout(()=>kill('SIGKILL'),1500);escalation.unref();};
@@ -73,12 +75,12 @@ export const cliRunner:AgentRunner={
   available:()=>['codex','claude'].map(id=>({id:id as Provider,available:!!executable(id as Provider)})),
   async run(request,signal,onSession,onUsage){
     const command=executable(request.provider);if(!command)throw new Error(request.provider+' is not installed or is not on the server PATH. Install it and sign in from a terminal first.');
+    if(!hasFixedPromptPolicy(request.prompt))throw new Error('Agent request is missing Narad fixed prompt policy.');
     const schemaPath=join(request.cwd,request.name+'.schema.json');const outputPath=join(request.cwd,request.name+'.result.json');
     await writeFile(schemaPath,JSON.stringify(request.schema));await writeFile(join(request.cwd,request.name+'.prompt.txt'),request.prompt);
-    const prompt=request.prompt+(request.provider==='claude'&&request.images.length?'\nRead these local source images with the Read tool before answering:\n'+request.images.join('\n'):'');
     const log=openSync(join(request.cwd,request.name+'.events.log'),'w');
     let result:{stdout:string;stderr:string};
-    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model}),cwd:request.cwd,input:prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); } finally { closeSync(log); }
+    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); } finally { closeSync(log); }
     signal.throwIfAborted();
     let value:unknown;
     if(request.provider==='codex') {try{const usage=codexUsage(result.stdout);if(usage)onUsage?.(usage)}catch{/* usage is best effort */}value=JSON.parse(await readFile(outputPath,'utf8'));}

@@ -1,0 +1,91 @@
+name: narad
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+      args:
+        NARAD_UID: ${NARAD_UID:-10001}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      agent:
+        condition: service_healthy
+    environment:
+      NARAD_DATA_DIR: /data
+      NARAD_PORT: "4318"
+      NARAD_BIND_HOST: 0.0.0.0
+      NARAD_WEB_ORIGIN: ${NARAD_WEB_ORIGIN:-}
+      NARAD_AGENT_SOCKET: /run/narad-agent/agent.sock
+      NARAD_AGENT_TOKEN: ${NARAD_AGENT_TOKEN:?Run ./start.sh start to create the private runtime tokens}
+      NARAD_AGENT_PROVIDERS: codex,claude
+      NARAD_TTS_URL: http://host.docker.internal:4321
+      NARAD_TTS_TOKEN: ${NARAD_TTS_TOKEN:?Run ./start.sh start to create the private runtime tokens}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:${NARAD_PORT:-4318}:4318
+    volumes:
+      - ./data:/data
+      - ./data/library:/data/library
+      - ./data/preparations:/data/preparations
+      - ./data/tutor:/data/tutor
+      - agent-control:/run/narad-agent
+    networks:
+      - api-egress
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  agent:
+    build:
+      context: .
+      target: agent
+      args:
+        NARAD_UID: ${NARAD_UID:-10001}
+    init: true
+    restart: unless-stopped
+    environment:
+      NARAD_AGENT_SOCKET: /run/narad-agent/agent.sock
+      NARAD_AGENT_TOKEN: ${NARAD_AGENT_TOKEN:?Run ./start.sh start to create the private runtime tokens}
+      NARAD_AGENT_ROOTS: /data/library,/data/preparations,/data/tutor
+    volumes:
+      - ./data/library:/data/library
+      - ./data/preparations:/data/preparations
+      - ./data/tutor:/data/tutor
+      - agent-home:/home/narad
+      - agent-control:/run/narad-agent
+    networks:
+      - agent-egress
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "node", "-e", "const h=require('node:http'),r=h.request({socketPath:process.env.NARAD_AGENT_SOCKET,path:'/health',headers:{Authorization:'Bearer '+process.env.NARAD_AGENT_TOKEN},timeout:2000},s=>process.exit(s.statusCode===200?0:1));r.on('timeout',()=>r.destroy());r.on('error',()=>process.exit(1));r.end()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  agent-home:
+  agent-control:
+
+networks:
+  api-egress:
+  agent-egress:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, type TeachingTask } from '../server/generation-content';
+import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, reconcileReviewIssues, type TeachingTask } from '../server/generation-content';
 import type { SourceBundle } from '../shared/sources';
 const article = (id:string) => ({id,title:id,kind:'article' as const,markdown:'# Measure\n\nLatency is 42 ms.\n\n![Plot](source-asset-0)\n\n| A | B |\n| --- | --- |\n| x | 12 |',assets:[{id:'source-asset-0',kind:'image' as const,alt:'Plot',caption:'Plot',src:'/api/source-assets/'+'a'.repeat(64)}],warnings:[],inventory:{images:1,inlineSvg:0,tables:1,savedVisuals:1}});
 export const bundle:SourceBundle={id:'collection',title:'Comparing measurements',createdAt:new Date().toISOString(),text:'Explain',status:'captured',sources:[article('one'),article('two')]};
@@ -40,6 +40,15 @@ it('preserves figure dialogue turns as a conversation rather than reusing the wa
  const b={...bundle,sources:[{...article('image'),kind:'image' as const,markdown:'![Plot](source-asset-0)'}]};const task=buildTeachingPlan(b)[0];const teaching=draft(task);const visual={...teaching.visuals[0],dialogueTurns:[{role:'host' as const,markdown:'What do the axes tell us?',spokenText:'What do the axes tell us?'},{role:'expert' as const,markdown:'The horizontal axis tells us which delay was measured.',spokenText:'The horizontal axis tells us which delay was measured.'}]};
  const lesson=compilePreparedBundle(b,[{task,teaching:{...teaching,visuals:[visual]}}],[{title:'Image',markdown:'A delay plot.',spokenText:'A delay plot.',sourceIds:['image']},{title:'Together',markdown:'Compare units.',spokenText:'Compare units.',sourceIds:['image']}],'visual-dialogue');
  const blocks=lesson.modes.dialogue!.sections[0].blocks;expect(blocks.some(b=>b.kind==='dialogue'&&b.role==='host'&&b.markdown==='What do the axes tell us?')).toBe(true);expect(blocks.some(b=>b.kind==='dialogue'&&b.role==='expert'&&b.markdown.includes('horizontal axis tells'))).toBe(true);expect(blocks.filter(b=>b.kind==='figure')).toHaveLength(1);
+});
+it('discards only visual turn-count review claims disproved by the parsed draft',()=>{
+ const task=buildTeachingPlan(bundle)[0];const teaching=draft(task);const turns=Array.from({length:12},(_,index)=>({role:(index%2?'expert':'host') as 'host'|'expert',markdown:'Turn '+index,spokenText:'Turn '+index}));
+ const reviewed={...teaching,visuals:teaching.visuals.map(visual=>({...visual,dialogueTurns:turns}))};
+ const falseCount='Visual source-asset-0 has 14 dialogue turns, exceeding the required maximum of 12 per visual. Merge exchanges to reach 12 or fewer turns.';
+ expect(reconcileReviewIssues(reviewed,[falseCount])).toEqual([]);
+ expect(reconcileReviewIssues(reviewed,[falseCount,'The orange shading is described as quantitative without a legend.'])).toEqual(['The orange shading is described as quantitative without a legend.']);
+ const combined='Visual source-asset-0 has 14 dialogue turns, exceeding the required maximum of 12 per visual; it also mislabels the vertical axis as revenue instead of latency.';
+ expect(reconcileReviewIssues(reviewed,[combined])).toEqual(['it also mislabels the vertical axis as revenue instead of latency.']);
 });
 it('does not accept invented non-URL source labels as discovered research links',async()=>{
  const {researchSchema}=await import('../server/generation-content');expect(researchSchema.safeParse({links:['Some authoritative article'],rationale:'Helpful'}).success).toBe(false);

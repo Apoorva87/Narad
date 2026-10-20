@@ -51,12 +51,57 @@ The equivalent manual development setup is:
 
 Open http://127.0.0.1:5178/. The API runs on port 4318. Both bind to loopback.
 
+For a background local development lifecycle similar to `start.sh`, use:
+
+    ./start_local.sh start
+    ./start_local.sh status
+    ./start_local.sh logs
+    ./start_local.sh restart
+    ./start_local.sh kill
+
+This path does not use Docker. It runs the hot-reloading API and Vite server, invokes Codex or Claude installed on the Mac, and starts the local speech worker on demand. Host and container provider credentials are separate; use `./start_local.sh login codex` or `./start_local.sh login claude` when the host CLI needs authentication. Stop the Docker stack with `./start.sh kill` before starting locally because both modes use API port 4318 and the same `data/` databases.
+
 For a production build:
 
     npm run build
     npm start
 
 Then open http://127.0.0.1:4318/. Stop either launch command with Ctrl+C.
+
+### Isolated container runtime
+
+Narad can run its web/API and Codex/Claude processes in containers while keeping MLX speech directly on macOS. This requires Docker with Compose plus the normal host speech installation from `./setup.sh --with-speech`.
+
+Authenticate each provider once inside the private `agent-home` Docker volume:
+
+    ./start.sh login codex
+    ./start.sh login claude
+
+Codex uses its device-code flow. Claude uses its normal subscription login and saves the credential in the private `agent-home` volume. If Claude's browser callback cannot reach the container, copy the code shown in the browser and paste it into the terminal when prompted.
+
+Then manage the complete service with:
+
+    ./start.sh start
+    ./start.sh status
+    ./start.sh restart
+    ./start.sh kill
+
+Open http://127.0.0.1:4318/ after `start` reports the API ready. `start` builds two Linux images, starts the internal agent service and public loopback API, and launches the macOS MLX host on port 4321. Private bearer tokens are generated under ignored `.narad/`; they are never printed by `status`.
+
+The API container mounts `./data`. The agent container mounts only `./data/library` (item folders, where each preparation's agent calls run in `<item>/preparation/calls/`), `./data/preparations` (legacy drafts awaiting migration), `./data/tutor`, a narrow Unix control socket, and its private named home volume. The two containers use separate Docker service networks, and the API is published only on the host loopback interface. The agent does not receive the host home directory, Narad SQLite files, TTS URL or token, or Docker socket. Both containers run as the invoking host user's numeric UID, use a read-only root filesystem, drop Linux capabilities, set `no-new-privileges`, limit PIDs, and use temporary `/tmp` filesystems. Provider authentication remains in the `agent-home` Docker volume when containers restart; `./start.sh kill` does not delete it.
+
+The agent can intentionally write prompts, logs, source-image copies, and structured results inside its two mounted job directories. It cannot use those mounts to reach other host files. To remove credentials as well as containers, explicitly remove the `narad_agent-home` volume after stopping Narad.
+
+For container debugging, follow service output or open a read-only-root shell:
+
+    docker logs -f narad-api-1
+    docker logs -f narad-agent-1
+    docker exec -it narad-api-1 sh
+    docker exec -it narad-agent-1 sh
+
+Preparation prompts, structured results, and provider event logs are also visible directly on the Mac under `data/library/<item>/preparation/calls/`; the source images sent to the agent are copied into `calls/images/` so they stay inside the agent's job directory. After an interrupted or failed run, **Continue** reuses the item's saved sections from `preparation/sections/`, even after the containers restart. It never resumes provider calls automatically after startup, and it regenerates a saved section when its source content or visual identity changed; changing the learner level sets the old run aside.
+
+Docker Desktop does not expose the Mac Metal GPU to Linux containers, so Qwen3-TTS stays on macOS. The API reaches it through `host.docker.internal` with a generated token and continues returning WAV chunks ephemerally. Do not publish port 4321 through a router or tunnel.
 
 ### Private access from an iPhone with Tailscale
 

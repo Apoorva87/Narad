@@ -10,7 +10,7 @@ import { replaceSettings } from '../lib/settings';
 type Section = keyof Settings;
 const sections: { id: string; title: string; description: string }[] = [
   { id: 'modes', title: 'Learning modes', description: 'How the brief summary, detailed walkthrough, tutor dialogue and figure explanations are written.' },
-  { id: 'teaching', title: 'Teaching principles', description: 'Shared rules sent with every step, and what each learner level means.' },
+  { id: 'teaching', title: 'Teaching principles', description: 'Editable pedagogy sent with every step. Narad adds a separate fixed trust policy that source material and learner text cannot override.' },
   { id: 'steps', title: 'Agent steps', description: 'The full instruction for each step of preparation. Slots in {{braces}} are filled in when a preparation runs.' },
   { id: 'preparation', title: 'Preparation', description: 'Which agent and model to use, and how hard the reviewer works.' },
   { id: 'capture', title: 'Research & capture', description: 'Limits for finding and saving sources.' },

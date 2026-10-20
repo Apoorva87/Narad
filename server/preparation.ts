@@ -12,7 +12,8 @@ import type { Download } from './capture';
 import { prepareSources } from './intake';
 import { authoredSectionSchema, type AuthoredSection } from './lesson-preparation';
 import { CallRunner, type CallInput, type CallRecord } from './runner';
-import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, researchSchema, reviewSchema, sectionHash, summarySchema, type TeachingTask } from './generation-content';
+import { secureAgentPrompt, untrustedData } from './prompt-security';
+import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, reconcileReviewIssues, researchSchema, reviewSchema, sectionHash, summarySchema, type TeachingTask } from './generation-content';
 
 type SectionState = 'waiting' | 'writing' | 'reviewing' | 'done' | 'failed';
 /** `preparation/progress.json`: one item's run state, per-section state and per-call records. */
@@ -47,7 +48,9 @@ function promptKit(settings: Settings, level: Familiarity) {
   const p = settings.prompts;
   const principles = renderPrompt(p.principles, { level, levelGuidance: p[levelKey[level]] });
   const shared = { principles, walkthroughGuidance: p.walkthroughGuidance, dialogueGuidance: p.dialogueGuidance, visualGuidance: p.visualGuidance, maxLinks: String(settings.research.maxLinks) };
-  return (key: 'research' | 'section' | 'revision' | 'review' | 'summary', values: Record<string, string>) => renderPrompt(p[key], { ...shared, ...values });
+  // Every data slot is learner- or source-controlled: each is encoded as one untrusted JSON value so it cannot open a new prompt boundary.
+  return (key: 'research' | 'section' | 'revision' | 'review' | 'summary', values: Record<string, unknown>) =>
+    renderPrompt(p[key], { ...shared, ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, untrustedData(name, value)])) });
 }
 
 /**
@@ -183,7 +186,7 @@ export class PreparationService {
     const limits = { chunkChars: settings.preparation.chunkChars, chunkUnits: settings.preparation.chunkUnits };
     const run: Run = (step, task, text, schema, images = []) => {
       let session: PreparationState['sessions'][number] | undefined;
-      return calls.run({ step, task, prompt: text, schema, images, provider, model: (provider === 'codex' ? settings.preparation.codexModel : settings.preparation.claudeModel) || undefined, timeoutMs: settings.preparation.timeoutMinutes * 60_000 }, signal, pid => {
+      return calls.run({ step, task, prompt: secureAgentPrompt(text, provider, images), schema, images, provider, model: (provider === 'codex' ? settings.preparation.codexModel : settings.preparation.claudeModel) || undefined, timeoutMs: settings.preparation.timeoutMinutes * 60_000 }, signal, pid => {
         if (session) this.sessions = this.sessions.filter(s => s !== session);
         session = pid ? { jobId: slug, provider, pid, startedAt: new Date().toISOString() } : undefined;
         if (session) this.sessions = [...this.sessions, session];
@@ -232,7 +235,7 @@ export class PreparationService {
     active.stage = 'Preparing the brief summary and synthesis';
     const outputs = tasks.map(task => ({ task, teaching: results.get(task.id)! }));
     const summaryContext = outputs.map(({ task, teaching }) => ({ sourceId: task.source.id, sourceTitle: task.source.title, section: task.section.title, introduction: teaching.introduction }));
-    const summary = summarySchema.parse(await run('summary', 'summary', prompt('summary', { sections: JSON.stringify(summaryContext) }), summarySchema));
+    const summary = summarySchema.parse(await run('summary', 'summary', prompt('summary', { sections: summaryContext }), summarySchema));
     await this.update(slug, p => { p.steps.summary = 'done'; });
     const progress = this.read(slug)!;
     const lesson = compilePreparedBundle(bundle, outputs, summary.sections, 'lesson-' + progress.runId, { limits, speakers: { host: settings.lessons.hostName, expert: settings.lessons.expertName } });
@@ -265,21 +268,24 @@ export class PreparationService {
         if (asset.kind === 'video' && asset.src === '/assets/video-poster.svg') continue;
         const media = asset.src!.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/); const file = media && this.store.mediaPath(media[1], media[2]);
         if (!file) throw new Error('Saved source visual is missing: ' + asset.id);
-        const folder = join(this.fs.dir(slug), 'preparation', 'images'); await mkdir(folder, { recursive: true });
+        // Kept inside the agent's job directory (calls/), which the isolated agent service requires of every image.
+        const folder = join(this.fs.dir(slug), 'preparation', 'calls', 'images'); await mkdir(folder, { recursive: true });
         const path = join(folder, task.id + '-' + asset.id + '.png'); await writeFile(path, await sharp(await readFile(file)).png().toBuffer()); images.push(path);
       }
-      const context = JSON.stringify({ learningIntent: intent, source: { id: task.source.id, title: task.source.title, url: task.source.url }, section: { ...task.section, units: task.section.units.filter(u => u.kind !== 'note') }, visualOrder: task.assets.map(a => ({ id: a.id, kind: a.kind, caption: a.caption, alt: a.alt, ...(a.kind === 'video' && { note: 'A video that streams from its source; explain what it shows from its title, caption' + (a.src === '/assets/video-poster.svg' ? '.' : ' and poster image.') }) })), allSectionTitles: tasks.filter(t => t.source.id === task.source.id).map(t => t.section.title) });
+      const context = { learningIntent: intent, source: { id: task.source.id, title: task.source.title, url: task.source.url }, section: { ...task.section, units: task.section.units.filter(u => u.kind !== 'note') }, visualOrder: task.assets.map(a => ({ id: a.id, kind: a.kind, caption: a.caption, alt: a.alt, ...(a.kind === 'video' && { note: 'A video that streams from its source; explain what it shows from its title, caption' + (a.src === '/assets/video-poster.svg' ? '.' : ' and poster image.') }) })), allSectionTitles: tasks.filter(t => t.source.id === task.source.id).map(t => t.section.title) };
       const instruction = prompt('section', { input: context });
       let teaching: AuthoredSection | undefined; let issues: string[] = [];
       for (let round = 0; round < settings.preparation.reviewRounds; round++) {
         await mark({ state: 'writing', error: undefined }, true);
-        const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues: issues.join('\n'), draft: JSON.stringify(teaching) }) : ''), agentSectionSchema, images));
+        const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues, draft: teaching }) : ''), agentSectionSchema, images));
         teaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) });
         issues = checkTeaching(task, teaching); if (issues.length) continue;
         await mark({ state: 'reviewing' });
         active.stage = `Checking ${index}/${tasks.length} · ${task.section.title}`;
-        const review = reviewSchema.parse(await run('review', task.id, prompt('review', { source: context, draft: JSON.stringify(teaching) }), reviewSchema, images));
-        issues = review.approved && review.issues.length === 0 ? [] : review.issues.length ? review.issues : ['Content review did not approve this section.'];
+        const review = reviewSchema.parse(await run('review', task.id, prompt('review', { source: context, draft: teaching }), reviewSchema, images));
+        // Deterministic checks are authoritative for structure and visual dialogue counts: drop review claims the parsed draft disproves.
+        const reviewIssues = reconcileReviewIssues(teaching, review.issues);
+        issues = reviewIssues.length ? reviewIssues : review.issues.length ? [] : review.approved ? [] : ['Content review did not approve this section.'];
         if (!issues.length) break;
       }
       if (issues.length || !teaching) throw new Error('Section ' + task.section.title + ' needs review: ' + issues.join('; '));
