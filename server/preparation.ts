@@ -52,6 +52,10 @@ function promptKit(settings: Settings, level: Familiarity) {
   return (key: 'research' | 'section' | 'revision' | 'review' | 'summary', values: Record<string, unknown>) =>
     renderPrompt(p[key], { ...shared, ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, untrustedData(name, value)])) });
 }
+function progressIssue(issues:string[]):string{
+  const text=issues[0]?.replace(/\s+/g,' ').trim()??'Improving the draft.';
+  return text.length>180?text.slice(0,177)+'…':text;
+}
 
 /**
  * Prepares one library item at a time. Progress lives in the item's `preparation/` folder: each finished section is saved
@@ -275,20 +279,23 @@ export class PreparationService {
       const context = { learningIntent: intent, source: { id: task.source.id, title: task.source.title, url: task.source.url }, section: { ...task.section, units: task.section.units.filter(u => u.kind !== 'note') }, visualOrder: task.assets.map(a => ({ id: a.id, kind: a.kind, caption: a.caption, alt: a.alt, ...(a.kind === 'video' && { note: 'A video that streams from its source; explain what it shows from its title, caption' + (a.src === '/assets/video-poster.svg' ? '.' : ' and poster image.') }) })), allSectionTitles: tasks.filter(t => t.source.id === task.source.id).map(t => t.section.title) };
       const instruction = prompt('section', { input: context });
       let teaching: AuthoredSection | undefined; let issues: string[] = [];
-      for (let round = 0; round < settings.preparation.reviewRounds; round++) {
+      // No round ceiling: revise until deterministic checks and review approve; the stage names the draft and current issue so the user can stop.
+      for (let round = 0; ; round++) {
+        const draft = round + 1;
+        active.stage = issues.length ? `Revising ${index}/${tasks.length} · draft ${draft} · ${progressIssue(issues)}` : `Writing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         await mark({ state: 'writing', error: undefined }, true);
         const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues, draft: teaching }) : ''), agentSectionSchema, images));
         teaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) });
         issues = checkTeaching(task, teaching); if (issues.length) continue;
         await mark({ state: 'reviewing' });
-        active.stage = `Checking ${index}/${tasks.length} · ${task.section.title}`;
+        active.stage = `Reviewing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         const review = reviewSchema.parse(await run('review', task.id, prompt('review', { source: context, draft: teaching }), reviewSchema, images));
         // Deterministic checks are authoritative for structure and visual dialogue counts: drop review claims the parsed draft disproves.
         const reviewIssues = reconcileReviewIssues(teaching, review.issues);
         issues = reviewIssues.length ? reviewIssues : review.issues.length ? [] : review.approved ? [] : ['Content review did not approve this section.'];
         if (!issues.length) break;
       }
-      if (issues.length || !teaching) throw new Error('Section ' + task.section.title + ' needs review: ' + issues.join('; '));
+      if (!teaching) throw new Error('Section ' + task.section.title + ' did not produce a draft.');
       const saved: SavedSection = { task: task.id, title: task.section.title, sourceHash: sectionHash(task), teaching };
       this.fs.writeJson(slug, `preparation/sections/${task.id}.json`, saved);
       await mark({ state: 'done', durationMs: Date.now() - started, error: undefined });

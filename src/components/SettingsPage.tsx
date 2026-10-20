@@ -72,7 +72,6 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
           <h2 id={'settings-title-' + section.id}>{section.title}</h2><p className="settings-section-description">{section.description}</p>
           {section.id === 'preparation' && <div className="settings-grid">
             <ChoiceField label="Default agent" {...field('preparation', 'defaultProvider')} options={providers.map(id => [id, id === 'codex' ? 'Codex' : 'Claude'])} />
-            <NumberField label="Review rounds per section" hint="Drafts and reviews before a section is marked as needing attention." min={1} max={5} {...field('preparation', 'reviewRounds')} />
             <TextField label="Codex model" hint="Leave empty for the Codex default. Passed as codex -m." {...field('preparation', 'codexModel')} />
             <TextField label="Claude model" hint="Leave empty for the Claude default. Passed as claude --model." {...field('preparation', 'claudeModel')} />
             <NumberField label="Section size (characters)" hint="Source text sent per writing call. Smaller is more focused." min={2000} max={20000} step={500} {...field('preparation', 'chunkChars')} />
