@@ -7,6 +7,7 @@ import { createApp } from './app';
 import { LessonStore } from './store';
 import { TutorStore } from './tutor-store';
 import { TutorService } from './tutor';
+import { migrateToLibrary } from './migrate';
 import { cliRunner } from './agent-runner';
 import samples from '../content/samples.json';
 
@@ -14,6 +15,13 @@ const dataDir = resolve(process.env.NARAD_DATA_DIR || 'data');
 mkdirSync(dataDir, { recursive: true });
 const store = new LessonStore(resolve(dataDir, 'narad.sqlite'), resolve(dataDir, 'library'));
 const tutorStore = new TutorStore(resolve(dataDir, 'tutor.sqlite'));
+// One-time move of content from the old SQLite tables into library folders; retried on each start until every item succeeds.
+try {
+  const migration = migrateToLibrary({ dbPath: resolve(dataDir, 'narad.sqlite'), dataDir, store, tutors: tutorStore });
+  const salvaged = Object.values(migration.salvaged).reduce((sum, n) => sum + n, 0);
+  if (migration.migrated || salvaged) console.log(`Narad library: moved ${migration.migrated} item(s) into folders, salvaged ${salvaged} finished section(s).`);
+  for (const line of migration.skipped) console.warn('Narad library migration:', line);
+} catch (error) { console.error('Narad library migration stopped; it will retry on the next start:', error); }
 // Samples become ordinary folders; their bundled images are copied in so each folder stands alone.
 for (const sample of samples) {
   if (store.resolveId(sample.id) || store.isDeletedSample(sample.id)) continue;
