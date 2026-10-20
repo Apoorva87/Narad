@@ -6,7 +6,7 @@ import { type Provider, type PrepareAction, type PreparationJob, type Preparatio
 import type { Familiarity } from '../shared/lesson';
 import { renderPrompt, type Settings } from '../shared/settings';
 import { LessonStore, StoreError } from './store';
-import { LibraryFs } from './library';
+import type { LibraryFs } from './library';
 import { cliRunner, type AgentRunner } from './agent-runner';
 import type { Download } from './capture';
 import { prepareSources } from './intake';
@@ -24,6 +24,8 @@ export type Progress = {
   calls: CallRecord[]; error?: string;
   /** Where the previously published run was archived (`runs/<runId>`), so publishing puts the old lesson.json beside its settings. */
   previous?: string;
+  /** Set (in a locked update) once the previous lesson.json is archived, before the new one is written, so a retried publish never archives twice. */
+  archivedLesson?: string;
 };
 type SavedSection = { task: string; title: string; sourceHash: string; teaching: AuthoredSection };
 type Active = { slug: string; title: string; provider: Provider; stage: string; stopping: boolean; startedAt: string; controller: AbortController; done: Promise<void> };
@@ -58,7 +60,7 @@ export class PreparationService {
   /** Settles once startup has marked runs left `running` as interrupted. */
   readonly ready: Promise<void>;
   constructor(private store: LessonStore, private dataDir: string, private runner: AgentRunner = cliRunner, private download?: Download) {
-    this.fs = new LibraryFs(store.libraryRoot);
+    this.fs = store.library;
     const marking = this.fs.slugs().filter(slug => this.read(slug)?.status === 'running')
       .map(slug => this.update(slug, p => { if (p.status === 'running') { p.status = 'interrupted'; p.error = INTERRUPTED; this.settle(p); } }));
     this.ready = Promise.all(marking).then(() => undefined, error => console.error('Could not mark interrupted preparations:', error));
@@ -236,12 +238,14 @@ export class PreparationService {
     active.stage = 'Publishing the lesson';
     // The previous version stays readable under runs/; the store then writes lesson.json, lesson.md and CREDITS.md atomically.
     const previousLesson = join(this.fs.dir(slug), 'lesson.json');
-    if (existsSync(previousLesson)) {
+    if (!progress.archivedLesson && existsSync(previousLesson)) {
       const target = progress.previous && existsSync(join(dir, progress.previous)) ? progress.previous : this.archive(slug, stamp(), []);
-      copyFileSync(previousLesson, join(dir, target, 'lesson.json'));
+      // Never replace an archived version: after a crash, lesson.json may already be this run's lesson.
+      if (!existsSync(join(dir, target, 'lesson.json'))) copyFileSync(previousLesson, join(dir, target, 'lesson.json'));
+      await this.update(slug, p => { p.archivedLesson = target; });
     }
     this.store.insert(lesson, { replace: true });
-    await this.update(slug, p => { p.steps.publish = 'done'; p.status = 'completed'; delete p.previous; delete p.error; });
+    await this.update(slug, p => { p.steps.publish = 'done'; p.status = 'completed'; delete p.previous; delete p.archivedLesson; delete p.error; });
   }
 
   private async section(slug: string, task: TeachingTask, tasks: TeachingTask[], intent: string, active: Active, run: Run, prompt: ReturnType<typeof promptKit>, settings: Settings): Promise<AuthoredSection> {

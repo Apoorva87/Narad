@@ -142,3 +142,15 @@ it('reports no preparation for an item that was never prepared',async()=>{
  const t=await setupThree(teach);
  const {existsSync}=await import('node:fs');expect(existsSync(join(t.folder,'progress.json'))).toBe(false);expect(t.service.state().jobs).toEqual([]);
 });
+it('never overwrites the archived previous lesson when publishing is retried after a crash',async()=>{
+ const t=await setupThree(teach);t.service.start('source','codex');expect((await finished(t.service)).status).toBe('completed');
+ const original=await readFile(join(t.store.libraryRoot,'time','lesson.json'),'utf8');
+ const insert=t.store.insert.bind(t.store);let crashed=false;
+ t.store.insert=((lesson:unknown,options:{replace?:boolean})=>{const saved=insert(lesson,options);if(!crashed){crashed=true;throw new Error('Process died after writing the lesson.')}return saved}) as typeof t.store.insert;
+ t.service.start('source','codex');expect((await finished(t.service)).status).toBe('failed');
+ const p=await t.progress();await writeFile(join(t.folder,'progress.json'),JSON.stringify({...p,status:'running'}));
+ const restarted=new PreparationService(t.store,t.dir,{run:teach,available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
+ restarted.start('source','codex');const again=await finished(restarted);expect(again.error).toBeUndefined();expect(again.status).toBe('completed');
+ const published=(await readdir(join(t.folder,'runs'))).filter(r=>!r.endsWith('-abandoned'));
+ expect(published).toHaveLength(1);expect(await readFile(join(t.folder,'runs',published[0],'lesson.json'),'utf8')).toBe(original);
+});

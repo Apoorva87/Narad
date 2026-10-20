@@ -44,6 +44,8 @@ export class LessonStore {
   readonly libraryRoot: string;
   private db: DatabaseSync;
   private fs: LibraryFs;
+  /** The folder access shared with the preparation service, so per-item locks cover every writer. */
+  get library(): LibraryFs { return this.fs; }
   private cache = new Map<string, { key: string; result: Parsed<unknown> }>();
   private temporaryRoot: boolean;
   private closed = false;
@@ -99,7 +101,8 @@ export class LessonStore {
     const bundleSlug = lesson.sourceBundleId ? this.resolveId(lesson.sourceBundleId) : undefined;
     if (lesson.sourceBundleId && (!bundleSlug || !this.getBundle(bundleSlug))) throw new StoreError('The source collection for this lesson was not found.', 400);
     const existing = this.resolveId(lesson.id);
-    if (existing && this.has(existing, 'lesson.json')) throw new StoreError('This analysis already exists. Use a new ID to import a separate copy.', 409);
+    // Re-publishing the same lesson ID over its own collection (a retried publish) is a replace, not a duplicate import.
+    if (existing && this.has(existing, 'lesson.json') && !(options.replace && existing === bundleSlug)) throw new StoreError('This analysis already exists. Use a new ID to import a separate copy.', 409);
     if (bundleSlug && !options.replace && this.has(bundleSlug, 'lesson.json')) throw new StoreError('This collection already has a lesson. Delete it or prepare a new version.', 409);
     for (const file of Object.keys(media)) if (!isMediaName(file)) throw new StoreError('Unsafe media file name: ' + file, 400);
     const slug = bundleSlug ?? slugify(lesson.title, new Set(this.fs.slugs()));
