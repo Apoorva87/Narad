@@ -89,13 +89,18 @@ export class LessonStore {
     }
     return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   }
-  /** Saves a lesson into its source collection's folder, or a new folder named from its title. `media` adds files to that folder's media/. */
-  insert(input: unknown, media: Record<string, Uint8Array> = {}): Lesson {
+  /**
+   * Saves a lesson into its source collection's folder, or a new folder named from its title.
+   * `replace` publishes over a collection's existing lesson; `media` adds files to the folder's media/.
+   */
+  insert(input: unknown, options: { replace?: boolean; media?: Record<string, Uint8Array> } = {}): Lesson {
+    const media = options.media ?? {};
     const lesson = parseLesson(input);
     const bundleSlug = lesson.sourceBundleId ? this.resolveId(lesson.sourceBundleId) : undefined;
     if (lesson.sourceBundleId && (!bundleSlug || !this.getBundle(bundleSlug))) throw new StoreError('The source collection for this lesson was not found.', 400);
     const existing = this.resolveId(lesson.id);
     if (existing && this.has(existing, 'lesson.json')) throw new StoreError('This analysis already exists. Use a new ID to import a separate copy.', 409);
+    if (bundleSlug && !options.replace && this.has(bundleSlug, 'lesson.json')) throw new StoreError('This collection already has a lesson. Delete it or prepare a new version.', 409);
     for (const file of Object.keys(media)) if (!isMediaName(file)) throw new StoreError('Unsafe media file name: ' + file, 400);
     const slug = bundleSlug ?? slugify(lesson.title, new Set(this.fs.slugs()));
     const item: Item = bundleSlug ? this.validItem(slug) : { title: lesson.title, createdAt: lesson.createdAt, level: lesson.familiarity, legacyIds: [] };
@@ -203,7 +208,8 @@ export class LessonStore {
       if (isSample) for (const value of ids) this.db.prepare('INSERT OR IGNORE INTO deleted_samples (id) VALUES (?)').run(value);
       for (const job of this.allJobs()) if (job.lessonId && ids.has(job.lessonId)) { const { lessonId: _removed, ...rest } = job; this.saveJob(rest); }
     });
-    if (this.item(slug).item?.status) {
+    // Decided from the files, not item.json, so a hand-broken item.json never costs the sources.
+    if (this.has(slug, 'sources')) {
       for (const file of ['lesson.json', 'lesson.md']) rmSync(join(this.fs.dir(slug), file), { force: true });
       this.tidy(slug);
     } else this.removeFolder(slug);

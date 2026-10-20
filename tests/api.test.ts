@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { get, request, type Server } from 'node:http';
 import { LessonStore } from '../server/store';
 import { createApp } from '../server/app';
+import { TutorStore } from '../server/tutor-store';
+import { TutorService } from '../server/tutor';
+import type { PreparationService } from '../server/preparation';
+import { readFileSync } from 'node:fs';
 import { minimalLesson } from './fixture';
 import { prepareSources } from '../server/intake';
 import { assetBlob } from '../server/capture';
@@ -199,4 +203,46 @@ it('resolves legacy IDs in lesson routes', async () => {
   expect((await (await fetch(base + '/api/lessons/fixture')).json()).id).toBe('a-lesson');
   expect((await fetch(base + '/api/lessons/fixture/progress', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'walkthrough', blockId: 'block-b' }) })).status).toBe(200);
   expect(store.getProgress('a-lesson').positions).toEqual({ walkthrough: 'block-b' });
+});
+it('refuses to publish a second lesson into an occupied collection folder', async () => {
+  const base = await setup();
+  const { slug } = savedVisual(Buffer.from('img'), 'image/png', 'Occupied');
+  store.insert({ ...minimalLesson(), sourceBundleId: slug });
+  const before = readFileSync(join(store.libraryRoot, slug, 'lesson.json'), 'utf8');
+  const response = await fetch(base + '/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...minimalLesson(), id: 'second', title: 'Second', sourceBundleId: slug }) });
+  expect(response.status).toBe(409);
+  expect((await response.json()).error).toBe('This collection already has a lesson. Delete it or prepare a new version.');
+  expect(readFileSync(join(store.libraryRoot, slug, 'lesson.json'), 'utf8')).toBe(before);
+});
+it('moves reading positions and tutor threads with either rename, and refuses renames while preparing', async () => {
+  let busy = false;
+  const preparation = { busy: () => busy } as unknown as PreparationService;
+  const turns = new TutorStore(':memory:');
+  const tutor = new TutorService(store = new LessonStore(':memory:'), turns, store.libraryRoot, { available: () => [], run: async () => ({}) });
+  server = createApp(store, preparation, undefined, { tutor }).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+  try {
+    const { slug } = savedVisual(Buffer.from('img'), 'image/png', 'Sources');
+    store.insert({ ...minimalLesson(), sourceBundleId: slug });
+    store.setProgress(slug, 'walkthrough', 'block-b');
+    const now = new Date().toISOString();
+    turns.save({ id: 't1', lessonId: slug, mode: 'walkthrough', sectionId: 'second', blockId: 'block-b', question: 'Why?', provider: 'codex', scope: 'lesson', status: 'ready', stage: 'Answer ready', createdAt: now, updatedAt: now } as any);
+    const patch = (path: string, title: string) => fetch(base + path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
+    const renamed = await (await patch('/api/source-bundles/' + slug, 'Renamed sources')).json();
+    expect(renamed.id).toBe('renamed-sources');
+    expect(store.getProgress('renamed-sources').positions).toEqual({ walkthrough: 'block-b' });
+    expect(turns.list('renamed-sources').map(turn => turn.id)).toEqual(['t1']);
+    const lesson = await (await patch('/api/lessons/renamed-sources', 'Renamed lesson')).json();
+    expect(lesson.id).toBe('renamed-lesson');
+    expect(store.getProgress('renamed-lesson').positions).toEqual({ walkthrough: 'block-b' });
+    expect(turns.list('renamed-lesson').map(turn => ({ id: turn.id, lessonId: turn.lessonId }))).toEqual([{ id: 't1', lessonId: 'renamed-lesson' }]);
+    busy = true;
+    for (const path of ['/api/lessons/renamed-lesson', '/api/source-bundles/renamed-lesson']) {
+      const refused = await patch(path, 'Blocked');
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error).toBe('Stop preparation before renaming.');
+    }
+    expect(store.resolveId('blocked')).toBeUndefined();
+  } finally { turns.close(); }
 });

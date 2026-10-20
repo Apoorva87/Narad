@@ -116,7 +116,11 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     await preparation?.forget(jobs);
   };
   app.patch('/api/source-bundles/:id', (req, res) => {
-    const bundle = store.renameBundle(req.params.id, renameInput.parse(req.body).title);
+    const slug = bundleSlug(req.params.id);
+    if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
+    const bundle = store.renameBundle(slug, renameInput.parse(req.body).title);
+    // The lesson, if any, shares this folder; its tutor threads follow the new slug.
+    if (bundle.id !== slug) options.tutor?.moveLesson(slug, bundle.id);
     res.json({ ...bundle, sources: bundle.sources.map(({ rawHtml: _raw, ...source }) => source) });
   });
   app.delete('/api/source-bundles/:id', async (req, res) => { await deleteBundle(req.params.id); res.status(204).end(); });
@@ -176,6 +180,7 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   });
   app.patch('/api/lessons/:id', (req, res) => {
     const slug = lessonSlug(req.params.id);
+    if (preparation?.busy(slug)) throw new StoreError('Stop preparation before renaming.', 409);
     const lesson = store.renameLesson(slug, renameInput.parse(req.body).title);
     if (lesson.id !== slug) options.tutor?.moveLesson(slug, lesson.id);
     res.json(lesson);

@@ -121,4 +121,15 @@ describe('library folders', () => {
     expect(store.resolveId('Hand/made')).toBeUndefined();
     expect(store.get('lesson-old')!.id).toBe('hand-made');
   });
+  it('keeps sources and media when a lesson is deleted from a folder with a hand-broken item.json', () => {
+    const { store } = setup();
+    const saved = store.saveBundle(bundle(), [blob]);
+    const lesson = minimalLesson(); lesson.sourceBundleId = saved.id;
+    store.insert(lesson);
+    writeFileSync(join(store.libraryRoot, saved.id, 'item.json'), '{');
+    store.deleteLesson(saved.id);
+    expect(existsSync(join(store.libraryRoot, saved.id, 'lesson.json'))).toBe(false);
+    expect(existsSync(join(store.libraryRoot, saved.id, 'sources', '01-attention-article.md'))).toBe(true);
+    expect(existsSync(join(store.libraryRoot, saved.id, 'media', '01-fig-01-attention-map.png'))).toBe(true);
+  });
 });

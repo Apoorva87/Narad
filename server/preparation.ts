@@ -8,6 +8,7 @@ import type { Familiarity } from '../shared/lesson';
 import { renderPrompt, type Settings } from '../shared/settings';
 import { LessonStore, StoreError } from './store';
 import { cliRunner, type AgentRunner, type AgentRequest } from './agent-runner';
+import type { Download } from './capture';
 import { prepareSources } from './intake';
 import { authoredSectionSchema } from './lesson-preparation';
 import { agentSectionSchema, buildTeachingPlan, checkTeaching, compilePreparedBundle, researchSchema, reviewSchema, summarySchema, type TeachingOutput } from './generation-content';
@@ -23,7 +24,7 @@ export class PreparationService {
   private active?:{job:PreparationJob;controller:AbortController;done:Promise<void>};
   private sessions:PreparationState['sessions']=[];
   private closing=false;
-  constructor(private store:LessonStore,private dataDir:string,private runner:AgentRunner=cliRunner){
+  constructor(private store:LessonStore,private dataDir:string,private runner:AgentRunner=cliRunner,private download?:Download){
     for(const job of store.listJobs()) if(job.status==='running'||job.status==='stopping') this.update(job,{status:'interrupted',stage:'Interrupted when the server stopped',error:'Preparation was interrupted. Saved drafts remain on disk. Start again to retry.'});
   }
   state():PreparationState{return{jobs:this.store.listJobs(),sessions:[...this.sessions],providers:this.runner.available()}}
@@ -46,7 +47,8 @@ export class PreparationService {
     if(!this.active||this.active.job.id!==id){const existing=this.store.listJobs().find(j=>j.id===id);if(existing)return existing;throw new StoreError('Preparation not found.',404)}
     this.update(this.active.job,{status:'stopping',stage:'Stopping agent…'});this.active.controller.abort();return{...this.active.job};
   }
-  busy(bundleId:string){return this.active?.job.bundleId===bundleId}
+  /** True while this collection is being prepared, matching old IDs and renamed slugs alike. */
+  busy(bundleId:string){const active=this.active?.job.bundleId;if(!active)return false;if(active===bundleId)return true;const slug=this.store.resolveId(bundleId);return !!slug&&this.store.resolveId(active)===slug}
   /** Deletes saved drafts, prompts and source image copies for these jobs. */
   async forget(jobs:PreparationJob[]){await Promise.all(jobs.map(job=>rm(join(this.dataDir,'preparations',job.id),{recursive:true,force:true})))}
   async shutdown(){this.closing=true;if(this.active){this.stop(this.active.job.id);await this.active.done}}
@@ -66,8 +68,9 @@ export class PreparationService {
       this.update(job,{stage:'Finding sources for your topic'});
       const linkSchema=researchSchema.extend({links:researchSchema.shape.links.max(settings.research.maxLinks)});
       const research=linkSchema.parse(await run('research','research',prompt('research',{request:bundle.text}),linkSchema));
-      const captured=await prepareSources({title:bundle.title,text:research.links.join('\n')},undefined,settings.capture);signal.throwIfAborted();
-      bundle={...bundle,sources:[...bundle.sources,...captured.bundle.sources.filter(s=>s.kind==='article')],status:captured.bundle.status};this.store.saveBundle(bundle,captured.blobs);
+      const captured=await prepareSources({title:bundle.title,text:research.links.join('\n')},this.download,settings.capture);signal.throwIfAborted();
+      // Saving moves captured images into the folder; continue with the served paths it returns.
+      bundle=this.store.saveBundle({...bundle,sources:[...bundle.sources,...captured.bundle.sources.filter(s=>s.kind==='article')],status:captured.bundle.status},captured.blobs);
     }
     await writeFile(join(cwd,'source-snapshot.json'),JSON.stringify(bundle,null,2));
     const tasks=buildTeachingPlan(bundle,limits);this.update(job,{total:tasks.length,stage:'Preparing the first section'});
@@ -99,6 +102,6 @@ export class PreparationService {
     const summary=summarySchema.parse(await run('summary','summary',prompt('summary',{sections:JSON.stringify(summaryContext)}),summarySchema));
     const lesson=compilePreparedBundle(bundle,outputs,summary.sections,'lesson-'+job.id,{limits,speakers:{host:settings.lessons.hostName,expert:settings.lessons.expertName}});signal.throwIfAborted();
     await writeFile(join(cwd,'lesson.json'),JSON.stringify(lesson,null,2));signal.throwIfAborted();
-    const saved=this.store.insert(lesson);this.update(job,{status:'completed',stage:'Lesson ready · all three modes saved',lessonId:saved.id});
+    const saved=this.store.insert(lesson,{replace:true});this.update(job,{status:'completed',stage:'Lesson ready · all three modes saved',lessonId:saved.id});
   }
 }

@@ -24,7 +24,7 @@ for (const sample of samples) {
     media[file] = readFileSync(resolve('public', 'assets', file));
     return { ...asset, src: 'media/' + file };
   });
-  store.insert({ ...sample, assets }, media);
+  store.insert({ ...sample, assets }, { media });
 }
 const port = Number(process.env.NARAD_PORT || 4318);
 const preparation = new PreparationService(store, dataDir);
