@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="t">
+<title id="t">Video, streamed from its source</title>
+<rect width="640" height="360" rx="16" fill="#e8ecf4"/>
+<circle cx="320" cy="180" r="56" fill="#17223b" fill-opacity="0.85"/>
+<path d="M303 150 L303 210 L352 180 Z" fill="#ffffff"/>
+</svg>

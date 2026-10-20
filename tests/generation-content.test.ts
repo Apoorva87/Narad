@@ -68,3 +68,18 @@ it('refuses a source with a blocking warning',()=>{
  const b={...bundle,sources:[{...noteSource(),warnings:[{kind:'blocking' as const,message:'Plot: failed'}]}]};
  expect(()=>buildTeachingPlan(b)).toThrow(/capture/);
 });
+it('carries credit and a streamed video through the library folder into the lesson',async()=>{
+ const {mkdtempSync,rmSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const {LessonStore}=await import('../server/store');const {captureArticle}=await import('../server/capture');
+ const html='<article><h1>Talks</h1><p>Watch now.</p><figure><iframe title="Lecture" src="https://www.youtube.com/embed/abcDEF123"></iframe><figcaption>Lecture. Credit: Ann</figcaption></figure></article>';
+ const captured=await captureArticle('https://example.com/p',async url=>({bytes:Buffer.from(html),type:'text/html',url}));
+ const dir=mkdtempSync(join(tmpdir(),'narad-video-'));const store=new LessonStore(join(dir,'db'));
+ try{
+  const saved=store.saveBundle({id:'b',title:'Talks',createdAt:new Date().toISOString(),text:'x',status:'captured',sources:[captured.source]},captured.blobs);
+  const reloaded=store.getBundle(saved.id)!;const asset=reloaded.sources[0].assets[0];
+  expect(asset).toMatchObject({kind:'video',src:'/assets/video-poster.svg',video:{provider:'youtube',embedUrl:'https://www.youtube-nocookie.com/embed/abcDEF123'},credit:{creditLine:'Lecture. Credit: Ann'}});
+  const tasks=buildTeachingPlan(reloaded);expect(tasks.flatMap(t=>t.assets).map(a=>a.kind)).toEqual(['video']);
+  const lesson=compilePreparedBundle(reloaded,tasks.map(t=>({task:t,teaching:draft(t)})),[{title:'S',markdown:'A talk.',spokenText:'A talk.',sourceIds:[reloaded.sources[0].id]},{title:'All',markdown:'A talk.',spokenText:'A talk.',sourceIds:[reloaded.sources[0].id]}],'lesson');
+  expect(lesson.assets[0]).toMatchObject({kind:'video',video:{provider:'youtube'},credit:{creditLine:'Lecture. Credit: Ann',pageUrl:'https://example.com/p'}});
+ }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});

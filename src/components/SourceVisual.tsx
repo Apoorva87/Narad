@@ -10,7 +10,7 @@ export function SourceVisual({ asset }: { asset: SourceAsset }) {
     <button className="source-image-button" onClick={() => setOpen(true)} aria-label={'Enlarge ' + asset.alt}>
       <img src={asset.src} alt={asset.alt} loading="lazy" onError={() => setFailed(true)} style={inline && asset.widthEm ? { width: asset.widthEm + 'em' } : undefined} />
     </button>
-    {!inline && <span className="source-caption">{asset.caption || asset.alt}<small>Original source visual · click to enlarge</small></span>}
+    {!inline && <span className="source-caption">{asset.caption || asset.alt}<small>{asset.kind === 'video' ? 'Video' : 'Original source visual'} · click to enlarge</small>{asset.video && <a className="text-link" href={asset.video.url} target="_blank" rel="noreferrer">Watch at the source ↗</a>}</span>}
     {open && <Modal title={asset.alt} onClose={() => setOpen(false)} wide><img className="enlarged-source-image" src={asset.src} alt={asset.alt} />{asset.caption && <p>{asset.caption}</p>}{asset.originalSrc && <a className="text-link" href={asset.originalSrc} download>Download original visual</a>}</Modal>}
   </span>;
 }

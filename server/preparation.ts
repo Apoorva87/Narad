@@ -79,10 +79,12 @@ export class PreparationService {
       signal.throwIfAborted();this.update(job,{stage:`Writing ${i+1}/${tasks.length} · ${task.source.title} · ${task.section.title}`});
       const images:string[]=[];
       for(const asset of task.assets){
+        // A video without a captured poster has no image to show the agent; its title and caption still go in the context.
+        if(asset.kind==='video'&&asset.src==='/assets/video-poster.svg')continue;
         const media=asset.src!.match(/^\/api\/library\/([^/]+)\/media\/([^/]+)$/);const file=media&&this.store.mediaPath(media[1],media[2]);if(!file)throw new Error('Saved source visual is missing: '+asset.id);
         const path=join(cwd,task.id+'-'+asset.id+'.png');await writeFile(path,await sharp(await readFile(file)).png().toBuffer());images.push(path);
       }
-      const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:{...task.section,units:task.section.units.filter(u=>u.kind!=='note')},visualOrder:task.assets.map(a=>({id:a.id,caption:a.caption,alt:a.alt})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
+      const context=JSON.stringify({learningIntent:bundle.text,source:{id:task.source.id,title:task.source.title,url:task.source.url},section:{...task.section,units:task.section.units.filter(u=>u.kind!=='note')},visualOrder:task.assets.map(a=>({id:a.id,kind:a.kind,caption:a.caption,alt:a.alt,...(a.kind==='video'&&{note:'A video that streams from its source; explain what it shows from its title, caption'+(a.src==='/assets/video-poster.svg'?'.':' and poster image.')})})),allSectionTitles:tasks.filter(t=>t.source.id===task.source.id).map(t=>t.section.title)});
       const instruction=prompt('section',{input:context});
       let teaching:TeachingOutput['teaching']|undefined;let issues:string[]=[];
       for(let attempt=0;attempt<settings.preparation.reviewRounds;attempt++){

@@ -29,7 +29,8 @@ export async function prepareSources(input: SourceInput, download?: Download, li
     catch { throw new StoreError('Could not read ' + image.name + '. Choose a valid PNG, JPEG, or WebP image.', 400); }
     blobs.push(blob);
     sources.push({ id: randomUUID(), title: image.name, kind: 'image', markdown: '![Uploaded image](source-asset-upload)',
-      assets: [{ id: 'source-asset-upload', kind: 'image', alt: image.name, caption: 'Uploaded source image · original preserved', src: '/api/source-assets/' + blob.id, originalSrc: '/api/source-assets/' + blob.id }], warnings: [], inventory: { ...inventory(), images: 1, savedVisuals: 1 } });
+      assets: [{ id: 'source-asset-upload', kind: 'image', alt: image.name, caption: 'Uploaded source image · original preserved', src: '/api/source-assets/' + blob.id, originalSrc: '/api/source-assets/' + blob.id,
+        credit: { pageTitle: image.name, pageUrl: '', creditLine: 'Your upload: ' + image.name, capturedAt: new Date().toISOString() } }], warnings: [], inventory: { ...inventory(), images: 1, savedVisuals: 1 } });
   }
   for (const url of urls) {
     try { const captured = await captureArticle(url, download); sources.push(captured.source); blobs.push(...captured.blobs); }

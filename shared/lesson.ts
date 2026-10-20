@@ -35,10 +35,25 @@ export function isSafeAsset(src: string) {
     || /^(\/api\/library\/[a-z0-9][a-z0-9-]{0,99}\/)?media\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/.test(src)
     || /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/]+={0,2}$/.test(src);
 }
+export const creditSchema = z.object({
+  pageTitle: z.string(), pageUrl: z.string(), mediaUrl: z.string().optional(), caption: z.string().optional(),
+  creditLine: z.string().max(300).optional(), license: z.string().optional(), capturedAt: z.string(),
+});
+const httpsUrl = z.url().refine(value => value.startsWith('https://'), 'Use an https link.');
+/** Videos stream from their source: embeds are limited to privacy-enhanced YouTube, Vimeo's player, or the original https file. */
+export const videoSchema = z.object({ provider: z.enum(['youtube', 'vimeo', 'file']), url: httpsUrl, embedUrl: httpsUrl }).superRefine((video, ctx) => {
+  const host = new URL(video.embedUrl).hostname;
+  const ok = video.provider === 'youtube' ? host === 'www.youtube-nocookie.com'
+    : video.provider === 'vimeo' ? host === 'player.vimeo.com' : video.embedUrl === video.url;
+  if (!ok) ctx.addIssue({ code: 'custom', message: 'This video embed is not from an allowed streaming host.', path: ['embedUrl'] });
+});
 const assetSchema = z.object({
   id, src: text.refine(isSafeAsset, 'Use a saved local image, a bundled /assets/ image, or an embedded PNG, JPEG, or WebP.'),
   alt: text, caption: text, provenance: z.enum(['source', 'teaching']),
-  kind: z.enum(['image', 'inline-svg']).optional(), widthEm: z.number().positive().max(100).optional(),
+  kind: z.enum(['image', 'inline-svg', 'video']).optional(), widthEm: z.number().positive().max(100).optional(),
+  credit: creditSchema.optional(), video: videoSchema.optional(),
+}).superRefine((asset, ctx) => {
+  if ((asset.kind === 'video') !== (asset.video !== undefined)) ctx.addIssue({ code: 'custom', message: 'A video asset needs video details, and only video assets have them.', path: ['video'] });
 });
 const sectionSchema = z.object({ id, title: text, description: text.optional(), blocks: z.array(blockSchema).min(1) });
 const modeSchema = z.object({ title: text, sections: z.array(sectionSchema).min(1) });

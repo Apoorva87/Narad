@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, sep } from 'node:path';
 import { z } from 'zod';
-import { familiarities, lessonSchema, modes, parseLesson, type Lesson, type LessonSummary, type Mode, type Progress } from '../shared/lesson';
+import { creditSchema, familiarities, lessonSchema, videoSchema, modes, parseLesson, type Lesson, type LessonSummary, type Mode, type Progress } from '../shared/lesson';
 import { flattenBlocks } from '../shared/navigation';
 import { isBlocking, legacyWarning, type SourceBundle, BundleSummary, AssetBlob, CapturedSource, SourceAsset } from '../shared/sources';
 import { resolveSettings, settingsOverrides, type Settings } from '../shared/settings';
@@ -30,7 +30,7 @@ type Item = z.infer<typeof itemSchema>;
 const sourceMetaSchema = z.object({
   id: z.string(), title: z.string(), kind: z.enum(['article', 'note', 'image']), url: z.string().optional(),
   assets: z.array(z.object({
-    id: z.string(), kind: z.enum(['image', 'inline-svg']), alt: z.string(), caption: z.string(),
+    id: z.string(), kind: z.enum(['image', 'inline-svg', 'video']), credit: creditSchema.optional(), video: videoSchema.optional(), alt: z.string(), caption: z.string(),
     src: z.string().optional(), originalSrc: z.string().optional(), originalUrl: z.string().optional(), widthEm: z.number().optional(), error: z.string().optional(),
   })),
   warnings: z.array(z.union([z.string().transform(legacyWarning), z.object({ kind: z.enum(['blocking', 'info']), message: z.string(), assetId: z.string().optional() })])),

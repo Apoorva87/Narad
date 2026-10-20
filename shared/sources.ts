@@ -8,8 +8,12 @@ export const sourceInputSchema = z.object({
   images: z.array(z.object({ name: z.string().min(1).max(240), data: z.string().max(8_000_000).regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/) })).max(6).default([]),
 }).refine(input => input.text.length > 0 || input.images.length > 0, { message: 'Add an idea, a link, or an image.' });
 export type SourceInput = z.input<typeof sourceInputSchema>;
+/** Where a captured image or video came from. Licence is only ever read from the page, never guessed. */
+export type Credit = { pageTitle: string; pageUrl: string; mediaUrl?: string; caption?: string; creditLine?: string; license?: string; capturedAt: string };
+/** A video that streams from its source; its bytes are never downloaded. */
+export type VideoRef = { provider: 'youtube' | 'vimeo' | 'file'; url: string; embedUrl: string };
 export type SourceAsset = {
-  id: string; kind: 'image' | 'inline-svg'; alt: string; caption: string;
+  id: string; kind: 'image' | 'inline-svg' | 'video'; credit?: Credit; video?: VideoRef; alt: string; caption: string;
   src?: string; originalSrc?: string; originalUrl?: string; widthEm?: number; error?: string;
 };
 /** Blocking warnings stop lesson preparation; informational ones become "Not captured" notes. */

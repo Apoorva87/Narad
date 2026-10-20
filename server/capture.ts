@@ -3,7 +3,7 @@ import { load } from 'cheerio';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import sharp from 'sharp';
-import type { CapturedSource, AssetBlob, SourceAsset } from '../shared/sources';
+import type { CapturedSource, AssetBlob, SourceAsset, VideoRef, Credit } from '../shared/sources';
 import { downloadPublic } from './download';
 export type Download = (url: string) => Promise<{ bytes: Buffer; type: string; url: string }>;
 export function assetBlob(bytes: Buffer, type: string): AssetBlob {
@@ -42,7 +42,20 @@ async function svgAsset(svg: string): Promise<{ original: AssetBlob; preview: As
   return { original, preview };
 }
 
-const isVideoFrame = (src?: string) => /youtube|youtu\.be|vimeo|video/i.test(src ?? '');
+const hostOf = (src?: string, base?: string) => { try { return new URL(src ?? '', base).hostname.toLowerCase(); } catch { return ''; } };
+const isVideoFrame = (src?: string, base?: string) => { const host = hostOf(src, base); return /(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(host) || host === 'player.vimeo.com'; };
+/** Streaming details for a video element or player iframe; undefined when it cannot be streamed over https. Never fetches anything. */
+function videoRef(src: string | undefined, base: string): VideoRef | undefined {
+  let url: URL; try { url = new URL(src ?? '', base); } catch { return undefined; }
+  if (url.protocol !== 'https:') return undefined;
+  if (isVideoFrame(url.href)) {
+    if (url.hostname === 'player.vimeo.com') { const id = url.pathname.match(/^\/video\/(\d+)/)?.[1]; return id ? { provider: 'vimeo', url: url.href, embedUrl: 'https://player.vimeo.com/video/' + id } : undefined; }
+    const id = url.pathname.match(/^\/embed\/([\w-]{6,})/)?.[1] ?? (url.pathname === '/watch' ? url.searchParams.get('v')?.match(/^[\w-]{6,}$/)?.[0] : undefined);
+    return id ? { provider: 'youtube', url: url.href, embedUrl: 'https://www.youtube-nocookie.com/embed/' + id } : undefined;
+  }
+  return { provider: 'file', url: url.href, embedUrl: url.href };
+}
+const CREDIT_WORDING = /\b(credit|source|image by|photo by|courtesy)\b|©/i;
 
 export async function captureArticle(url: string, download: Download = downloadPublic): Promise<{ source: CapturedSource; blobs: AssetBlob[] }> {
   const response = await download(url);
@@ -58,13 +71,13 @@ export async function captureArticle(url: string, download: Download = downloadP
     element.replaceWith($('<span>').attr('data-narad-math', element.text()).attr('data-display', element.attr('type')?.includes('mode=display') ? 'block' : 'inline').text(element.text()));
   });
   root.find('script, style, nav, button, noscript, form').remove();
-  if (root.find('video, audio, iframe').filter((_i, node) => node.tagName !== 'iframe' || isVideoFrame($(node).attr('src'))).length) source.warnings.push({ kind: 'info', message: 'This page includes video or audio that a static capture cannot keep. Check the original: ' + response.url });
+  if (root.find('audio').length) source.warnings.push({ kind: 'info', message: 'This page includes audio that a static capture cannot keep. Check the original: ' + response.url });
   if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push({ kind: 'info', message: 'A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.' });
   const blobs: AssetBlob[] = []; let downloadedBytes = response.bytes.length;
   // Interactive elements cannot be kept; leave a marker and say so. Done before collecting visuals so images inside them are not registered.
   let notes = 0;
   const marker = () => $('<p>').append($('<img>').attr('src', 'source-note-' + notes++).attr('alt', 'Interactive figure'));
-  root.find('canvas, iframe, math').filter((_i, node) => node.tagName !== 'iframe' || !isVideoFrame($(node).attr('src'))).each((_i, node) => {
+  root.find('canvas, iframe, math').filter((_i, node) => node.tagName !== 'iframe' || !isVideoFrame($(node).attr('src'), response.url)).each((_i, node) => {
     const element = $(node);
     if (node.tagName === 'math') {
       const tex = element.find('annotation[encoding="application/x-tex"]').first().text().trim();
@@ -77,21 +90,48 @@ export async function captureArticle(url: string, download: Download = downloadP
     else element.replaceWith(marker());
     source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + response.url });
   });
-  const visuals = root.find('img, svg').filter((_i, node) => $(node).parents('svg').length === 0 && !$(node).attr('src')?.startsWith('source-note-')).toArray();
+  // Videos stream from their source: resolve each to a link now, and drop any that cannot be streamed.
+  root.find('video, iframe').each((_i, node) => {
+    const element = $(node);
+    if (node.tagName === 'iframe' ? !isVideoFrame(element.attr('src'), response.url) : element.parents('video').length > 0) return;
+    const ref = videoRef(node.tagName === 'iframe' ? element.attr('src') : element.attr('src') || element.find('source[src]').first().attr('src'), response.url);
+    if (ref) element.attr('data-narad-video', JSON.stringify(ref));
+    else { element.replaceWith(marker()); source.warnings.push({ kind: 'info', message: 'A video here could not be streamed (it needs a secure link). Open the original: ' + response.url }); }
+  });
+  const licenseOf = () => {
+    const link = $('link[rel~="license"], a[rel~="license"]').first().attr('href') || $('a[href*="creativecommons.org/licenses"]').first().attr('href');
+    if (link) { try { return new URL(link, response.url).href; } catch { return undefined; } }
+    return $('meta[name="copyright" i], meta[name="dc.rights" i]').first().attr('content')?.trim() || undefined;
+  };
+  const license = licenseOf(); const capturedAt = new Date().toISOString();
+  const creditLineOf = (element: ReturnType<typeof $>) => {
+    const figure = element.closest('figure');
+    const near = figure.length ? figure : element;
+    const own = figure.find('figcaption, cite, small').toArray().map(item => $(item).text().trim()).find(Boolean);
+    const adjacent = own ? undefined : [element.next(), element.prev(), near.next(), near.prev()].map(item => item.text().trim()).find(text => text && text.length <= 600 && CREDIT_WORDING.test(text));
+    return (own ?? adjacent)?.replace(/\s+/g, ' ').slice(0, 300);
+  };
+  const visuals = root.find('img, svg, video, iframe').filter((_i, node) => $(node).parents('svg').length === 0 && $(node).parents('video').length === 0 && !$(node).attr('src')?.startsWith('source-note-') && (!['video', 'iframe'].includes(node.tagName) || !!$(node).attr('data-narad-video'))).toArray();
   // Keep source order while limiting network concurrency. No background worker infrastructure needed.
   const tasks = visuals.map((node, index) => {
-    const element = $(node); const isSvg = node.tagName === 'svg';
+    const element = $(node); const isSvg = node.tagName === 'svg'; const isVideo = !!element.attr('data-narad-video');
     const svg = isSvg ? $.html(node) : undefined;
     const caption = element.closest('figure').find('figcaption').text().trim();
-    const asset: SourceAsset = { id: 'source-asset-' + index, kind: isSvg ? 'inline-svg' : 'image', alt: element.attr('alt')?.trim() || element.attr('aria-label') || (isSvg ? 'Source equation or diagram ' : 'Source figure ') + (index + 1), caption };
+    const video: VideoRef | undefined = isVideo ? JSON.parse(element.attr('data-narad-video')!) : undefined;
+    const label = element.attr('title')?.trim() || element.attr('aria-label')?.trim() || element.attr('alt')?.trim();
+    const asset: SourceAsset = { id: 'source-asset-' + index, kind: isVideo ? 'video' : isSvg ? 'inline-svg' : 'image',
+      alt: isVideo ? label || caption || 'Video ' + (index + 1) : label || (isSvg ? 'Source equation or diagram ' : 'Source figure ') + (index + 1), caption, ...(video && { video }) };
     if (isSvg && /^[\d.]+em$/.test(element.attr('width') ?? '')) asset.widthEm = Math.min(100, parseFloat(element.attr('width')!));
-    const rawSrc = element.attr('data-src') || element.attr('src') || element.attr('data-original');
+    const rawSrc = isVideo ? element.attr('poster') : element.attr('data-src') || element.attr('src') || element.attr('data-original');
+    const creditLine = creditLineOf(element);
+    asset.credit = { pageTitle: source.title, pageUrl: response.url, ...(video && { mediaUrl: video.url }), ...(caption && { caption }), ...(creditLine && { creditLine }), ...(license && { license }), capturedAt };
     source.assets.push(asset);
     element.replaceWith($('<img>').attr('src', asset.id).attr('alt', asset.alt));
     return async () => {
       try {
         if (index >= 200) throw new Error('More than 200 visuals; review the remaining figures at the source.');
         if (downloadedBytes > 80 * 1024 * 1024) throw new Error('Source visuals exceed the 80 MB capture limit.');
+        if (isVideo && !rawSrc) { asset.src = '/assets/video-poster.svg'; source.inventory.savedVisuals++; return; }
         if (svg) {
           const { original, preview } = await svgAsset(svg); blobs.push(original, preview);
           asset.src = assetPath(preview); asset.originalSrc = assetPath(original);
@@ -100,6 +140,7 @@ export async function captureArticle(url: string, download: Download = downloadP
           let bytes: Buffer;
           if (/^data:image\/(png|jpeg|webp);base64,/.test(rawSrc)) bytes = Buffer.from(rawSrc.split(',')[1], 'base64');
           else { asset.originalUrl = new URL(rawSrc, response.url).href; bytes = (await download(asset.originalUrl)).bytes; }
+          if (asset.originalUrl && asset.credit && !video) asset.credit.mediaUrl = asset.originalUrl;
           downloadedBytes += bytes.length;
           if (downloadedBytes > 80 * 1024 * 1024) throw new Error('Source visuals exceed the 80 MB capture limit.');
           if (/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(bytes.toString('utf8', 0, 500))) {

@@ -130,3 +130,59 @@ describe('public source requests', () => {
     expect(isPublicAddress('2606:4700:4700::1111')).toBe(true);
   });
 });
+
+describe('credits and streamed videos', () => {
+  const page = (body: string, head = '') => '<html><head><title>Paper page</title>' + head + '</head><body><article><h1>Heads</h1>' + body + '</article></body></html>';
+  const run = async (html: string, png?: Buffer) => {
+    const requested: string[] = [];
+    const captured = await captureArticle('https://example.com/post', async url => {
+      requested.push(url);
+      return url === 'https://example.com/post' ? { bytes: Buffer.from(html), type: 'text/html', url } : { bytes: png!, type: 'image/png', url };
+    });
+    return { ...captured, requested };
+  };
+  it('records where each image came from, its credit line and a never-guessed licence', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'red' } }).png().toBuffer();
+    const { source } = await run(page('<figure><img src="a.png" alt="A"><figcaption>Attention heads. Credit: Jane Doe</figcaption></figure><a href="https://creativecommons.org/licenses/by/4.0/">CC BY</a>'), png);
+    expect(source.assets[0].credit).toMatchObject({ pageTitle: 'Heads', pageUrl: 'https://example.com/post', mediaUrl: 'https://example.com/a.png', caption: 'Attention heads. Credit: Jane Doe' });
+    expect(source.assets[0].credit?.creditLine).toMatch(/Credit: Jane Doe/);
+    expect(source.assets[0].credit?.license).toMatch(/creativecommons/);
+    expect(source.assets[0].credit?.capturedAt).toMatch(/^\d{4}-/);
+  });
+  it('leaves the licence absent and trims long credit lines to 300 characters', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'red' } }).png().toBuffer();
+    const { source } = await run(page('<img src="a.png" alt="A"><p>Photo by ' + 'x'.repeat(400) + '</p>'), png);
+    expect(source.assets[0].credit?.license).toBeUndefined();
+    expect(source.assets[0].credit?.creditLine?.length).toBe(300);
+  });
+  it('reads a licence from link rel=license or copyright meta', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'red' } }).png().toBuffer();
+    expect((await run(page('<img src="a.png">', '<link rel="license" href="https://example.com/terms">'), png)).source.assets[0].credit?.license).toBe('https://example.com/terms');
+    expect((await run(page('<img src="a.png">', '<meta name="copyright" content="(c) Example Ltd">'), png)).source.assets[0].credit?.license).toBe('(c) Example Ltd');
+  });
+  it('streams a YouTube iframe from youtube-nocookie without requesting it, and raises no warning', async () => {
+    const { source, requested } = await run(page('<p>Watch.</p><iframe title="Lecture" src="https://www.youtube.com/embed/abc123XYZ_-"></iframe>'));
+    expect(source.assets[0]).toMatchObject({ kind: 'video', alt: 'Lecture', src: '/assets/video-poster.svg', video: { provider: 'youtube', embedUrl: 'https://www.youtube-nocookie.com/embed/abc123XYZ_-' } });
+    expect(source.markdown).toContain('![Lecture](source-asset-0)');
+    expect(requested).toEqual(['https://example.com/post']);
+    expect(source.warnings).toEqual([]);
+    expect(source.assets[0].credit?.mediaUrl).toBe('https://www.youtube.com/embed/abc123XYZ_-');
+  });
+  it('streams Vimeo and downloads only a video poster, never the video file', async () => {
+    const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: 'red' } }).png().toBuffer();
+    const { source, requested, blobs } = await run(page('<video poster="p.png" src="v.mp4"></video><iframe src="https://player.vimeo.com/video/123"></iframe>'), png);
+    expect(requested).toEqual(['https://example.com/post', 'https://example.com/p.png']);
+    expect(source.assets[0]).toMatchObject({ kind: 'video', video: { provider: 'file', url: 'https://example.com/v.mp4', embedUrl: 'https://example.com/v.mp4' } });
+    expect(source.assets[0].src).toMatch(/^\/api\/source-assets\//);
+    expect(blobs).toHaveLength(1);
+    expect(source.assets[1].video).toMatchObject({ provider: 'vimeo', embedUrl: 'https://player.vimeo.com/video/123' });
+    expect(source.warnings).toEqual([]);
+  });
+  it('uses video > source and still warns for audio and unknown iframes', async () => {
+    const { source } = await run(page('<video><source src="/clip.webm"></video><audio src="a.mp3"></audio><iframe src="https://evil.example/video/1"></iframe>'));
+    expect(source.assets).toHaveLength(1);
+    expect(source.assets[0].video?.url).toBe('https://example.com/clip.webm');
+    expect(source.warnings.map(w => w.message)).toEqual([expect.stringMatching(/audio/i), expect.stringMatching(/interactive figure/i)]);
+  });
+});
+

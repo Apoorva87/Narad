@@ -51,3 +51,18 @@ describe('latest figure', () => {
     expect(latestFigureIndex(blocks, blocks.length - 1)).toBe(figure);
   });
 });
+
+describe('video assets', () => {
+  const lessonWith = (video: unknown, kind = 'video') => { const lesson = minimalLesson(); lesson.assets = [{ id: 'v', src: '/assets/video-poster.svg', alt: 'Talk', caption: 'Talk', provenance: 'source', kind, ...(video ? { video } : {}) }]; return lesson; };
+  it('accepts streamed embeds and requires a video object', () => {
+    expect(parseLesson(lessonWith({ provider: 'youtube', url: 'https://youtu.be/x', embedUrl: 'https://www.youtube-nocookie.com/embed/x' })).assets[0].kind).toBe('video');
+    expect(() => parseLesson(lessonWith(undefined))).toThrow();
+  });
+  it('rejects an embed on another host', () => {
+    expect(() => parseLesson(lessonWith({ provider: 'youtube', url: 'https://evil.example/embed', embedUrl: 'https://evil.example/embed' }))).toThrow();
+    expect(() => parseLesson(lessonWith({ provider: 'vimeo', url: 'https://vimeo.com/1', embedUrl: 'https://www.youtube.com/embed/x' }))).toThrow();
+    expect(() => parseLesson(lessonWith({ provider: 'file', url: 'https://a.example/v.mp4', embedUrl: 'https://evil.example/embed' }))).toThrow();
+    expect(() => parseLesson(lessonWith({ provider: 'file', url: 'http://a.example/v.mp4', embedUrl: 'http://a.example/v.mp4' }))).toThrow();
+    expect(parseLesson(lessonWith({ provider: 'file', url: 'https://a.example/v.mp4', embedUrl: 'https://a.example/v.mp4' })).assets).toHaveLength(1);
+  });
+});

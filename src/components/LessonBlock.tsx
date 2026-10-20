@@ -21,7 +21,7 @@ export function LessonBlock({ block, lesson, active, onSelect, onSource }: {
         : <button className="figure-button" onClick={() => setExpanded(true)} aria-label={'Enlarge diagram: ' + asset.alt}>
           <img src={asset.src} alt={asset.alt} loading="lazy" onError={() => setImageFailed(true)} /><span className="enlarge-label"><Maximize2 size={14} /> Enlarge</span>
         </button>}
-      <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}</figcaption>
+      <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}{asset.video && <> <a className="text-link" href={asset.video.url} target="_blank" rel="noreferrer">Watch at the source ↗</a></>}</figcaption>
     </figure>}
     <Markdown assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>
     <div className="block-attribution">

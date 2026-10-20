@@ -43,7 +43,7 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
   const notes = new Map(authored.flatMap(section => section.visuals).map(visual => [visual.id, visual]));
   const assets = source.assets.map(asset => {
     const note = notes.get(asset.id); if (!note) throw new Error('Missing visual explanation: ' + asset.id);
-    return { id: asset.id, src: asset.src!, kind: asset.kind, widthEm: asset.widthEm, alt: note.caption, caption: note.caption, provenance: 'source' as const };
+    return { id: asset.id, src: asset.src!, kind: asset.kind, widthEm: asset.widthEm, credit: asset.credit, video: asset.video, alt: note.caption, caption: note.caption, provenance: 'source' as const };
   });
   const { host, expert } = input.speakers ?? { host: 'Maya', expert: 'Arun' };
   const makeMode = (mode: 'walkthrough' | 'dialogue'): Section[] => layout.map(section => {
