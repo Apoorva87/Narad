@@ -63,6 +63,15 @@ describe('source preservation', () => {
     expect(captured.source.warnings[0].kind).toBe('blocking');
     expect(isBlocking(captured.source)).toBe(true);
   });
+  it('blocks capture when the article references numbered figures but exposes no visual assets', async () => {
+    const captured = await captureArticle('https://example.com/paper', async url => ({ bytes: Buffer.from('<article><h1>Paper</h1><p>Figure 1 shows the wafer layout.</p><p>As shown in Fig. 2, bandwidth scales linearly.</p></article>'), type: 'text/html', url }));
+    expect(captured.source.assets).toEqual([]);
+    expect(captured.source.warnings).toEqual([expect.objectContaining({
+      kind: 'blocking',
+      message: expect.stringMatching(/references numbered figures.*no visual assets were captured/i),
+    })]);
+    expect(isBlocking(captured.source)).toBe(true);
+  });
   it('classifies legacy string warnings', () => {
     expect(legacyWarning('A table contains merged cells. Its preview is flattened.').kind).toBe('info');
     expect(legacyWarning('Source unavailable').kind).toBe('blocking');
@@ -272,7 +281,7 @@ describe('Next.js pages with Sanity portable text figures', () => {
       const plain = await run(page(''));
       expect(requested).toEqual(['https://blog.example.com/post']);
       expect(source.assets).toEqual([]);
-      expect(source.warnings).toEqual([]);
+      expect(source.warnings.map(warning => warning.kind)).toEqual(['blocking']);
       expect(source.markdown).toBe(plain.source.markdown);
     }
   });
@@ -298,12 +307,12 @@ describe('Next.js pages with Sanity portable text figures', () => {
     const { source, requested } = await run(page(pushes(hostile)));
     expect(performance.now() - started).toBeLessThan(1000);
     expect(requested).toEqual(['https://blog.example.com/post']);
-    expect(source.warnings).toEqual([]);
+    expect(source.warnings.map(warning => warning.kind)).toEqual(['blocking']);
     expect(source.markdown).toContain('Scaling out therefore');
     const oversized = '<script>self.__next_f.push([1,' + JSON.stringify('9:"' + 'a'.repeat(11 * 1024 * 1024) + '"\n') + '])</script>';
     const huge = await run(page(oversized + pushes(payload)));
     expect(huge.requested).toEqual(['https://blog.example.com/post']);
-    expect(huge.source.warnings).toEqual([]);
+    expect(huge.source.warnings.map(warning => warning.kind)).toEqual(['blocking']);
   });
   it('never lets javascript: or data: link annotations into the markdown', async () => {
     const unsafe = body.map(item => item._key === 'p2' ? { ...item, markDefs: [{ _key: 'lnk', _type: 'link', href: 'javascript:alert(1)' }, { _key: 'd', _type: 'link', href: 'data:text/html,<script>alert(1)</script>' }],

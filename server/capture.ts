@@ -212,5 +212,8 @@ export async function captureArticle(url: string, download: Download = downloadP
   });
   source.markdown = converter.turndown(root.html() ?? '');
   if (!source.markdown.trim()) source.warnings.push({ kind: 'blocking', message: 'No readable article content was found. This page may require JavaScript or a sign-in.' });
+  if (!source.assets.length && /\b(?:figures?|figs?)\s*(?:no\.?\s*)?\d+\b/i.test(source.markdown)) {
+    source.warnings.push({ kind: 'blocking', message: 'The article references numbered figures, but no visual assets were captured. The source may load figures dynamically or use an unsupported image delivery method; inspect the original page and add the figures before preparing. ' + response.url });
+  }
   return { source, blobs };
 }
