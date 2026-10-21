@@ -107,6 +107,8 @@ Docker Desktop does not expose the Mac Metal GPU to Linux containers, so Qwen3-T
 
 Keep Narad bound to loopback and let [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve) provide the private HTTPS endpoint. Install and sign in to Tailscale on the Mac and iPhone, then choose the exact HTTPS name for this Mac and start Narad with it:
 
+For the usual setup, run `./start_tailscale.sh`. It connects Tailscale, saves this Mac's HTTPS tailnet origin in `.narad/compose.env`, starts Narad (including the macOS speech worker), waits for the API health check, and configures Serve. It does not enable Funnel. Run `./start.sh restart` later to restart Narad services; Tailscale Serve keeps its route.
+
     npm run build
     NARAD_WEB_ORIGIN=https://<machine>.<tailnet>.ts.net npm start
 

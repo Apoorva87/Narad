@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -65,4 +66,47 @@ it('reports an isolated local runtime as stopped without requiring Docker',async
   const {stdout}=await execute('bash',[new URL('../start_local.sh',import.meta.url).pathname,'status'],{cwd:new URL('../',import.meta.url).pathname,env:{...process.env,NARAD_LOCAL_RUNTIME_DIR:runtime}});
   expect(stdout).toContain('Local Narad: stopped');expect(stdout).toContain('API: unavailable');expect(stdout).toContain('Web: unavailable');
  }finally{await rm(runtime,{recursive:true,force:true})}
+});
+
+it('starts Narad behind private Tailscale Serve using this machine exact HTTPS origin',async()=>{
+ const source=new URL('../start_tailscale.sh',import.meta.url);
+ expect(existsSync(source)).toBe(true);
+ if(!existsSync(source))return;
+ const sandbox=await mkdtemp(join(tmpdir(),'narad-tailscale-'));
+ try{
+  const bin=join(sandbox,'bin');await mkdir(bin,{recursive:true});
+  await writeFile(join(sandbox,'start_tailscale.sh'),await readFile(source),{mode:0o755});
+  const log=join(sandbox,'calls.log');
+  await writeFile(join(bin,'tailscale'),`#!/bin/bash
+printf 'tailscale %s\\n' "$*" >> "$CALL_LOG"
+case "$*" in
+  'status --json') printf '{"Self":{"DNSName":"narad.example.ts.net."}}\\n' ;;
+esac
+`,{mode:0o755});
+  await writeFile(join(bin,'open'),`#!/bin/bash
+printf 'open %s\\n' "$*" >> "$CALL_LOG"
+`,{mode:0o755});
+  await writeFile(join(bin,'curl'),`#!/bin/bash
+printf '{"status":"ok"}'
+`,{mode:0o755});
+  await writeFile(join(sandbox,'start.sh'),`#!/bin/bash
+if [[ "$1" == status ]]; then
+ mkdir -p .narad
+ printf 'NARAD_AGENT_TOKEN=private-agent\\nNARAD_TTS_TOKEN=private-tts\\n' > .narad/compose.env
+else
+ source .narad/compose.env
+ printf 'narad %s origin=%s\\n' "$*" "$NARAD_WEB_ORIGIN" >> "$CALL_LOG"
+fi
+`,{mode:0o755});
+  const {stdout}=await execute('bash',[join(sandbox,'start_tailscale.sh')],{cwd:sandbox,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,CALL_LOG:log}});
+  const calls=await readFile(log,'utf8');
+  const runtimeConfig=await readFile(join(sandbox,'.narad','compose.env'),'utf8');
+  expect(calls).toContain('tailscale up');
+  expect(calls).toContain('narad start origin=https://narad.example.ts.net');
+  expect(calls).toContain('tailscale serve --bg 4318');
+  expect(calls).not.toContain('funnel');
+  expect(runtimeConfig).toContain('NARAD_WEB_ORIGIN=https://narad.example.ts.net');
+  expect(runtimeConfig).toContain('NARAD_AGENT_TOKEN=private-agent');
+  expect(stdout).toContain('https://narad.example.ts.net');
+ }finally{await rm(sandbox,{recursive:true,force:true})}
 });
