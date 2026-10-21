@@ -44,8 +44,16 @@ export class NarrationController {
     if(!this.items.length||!['loading','playing','paused'].includes(this.state.status)){this.items=items;return true}
     const current=this.items[this.index];const key=(item:NarrationItem)=>[item.lessonId,item.mode,item.blockId,item.chunk,item.tutor?.turnId??'',item.tutor?.part??''].join('|');
     const index=items.findIndex(item=>key(item)===key(current));if(index<0)return false;
-    for(const entry of this.prefetched.values()) {if(entry.audio)entry.audio.release();else void entry.promise.then(audio=>audio?.release())}this.prefetched.clear();
-    this.items=items;this.index=index;return true;
+    // Tutor polling rebuilds identical items every few seconds: keep audio already prefetched for an unchanged item
+    // (same text position and voice) at its new index, so the single speech worker never renders the same chunk twice.
+    const same=(a:NarrationItem,b:NarrationItem)=>JSON.stringify(a)===JSON.stringify(b);
+    const kept=new Map<number,PrefetchedAudio>();
+    for(const [at,entry] of this.prefetched) {
+      const item=this.items[at];const moved=item?items.findIndex((candidate,i)=>i>index&&same(candidate,item)):-1;
+      if(moved>=0&&!kept.has(moved))kept.set(moved,entry);
+      else if(entry.audio)entry.audio.release();else void entry.promise.then(audio=>audio?.release());
+    }
+    this.prefetched=kept;this.items=items;this.index=index;return true;
   }
   private effectiveRate(){const pace=this.items[this.index]?.pace??'normal';const factor=pace==='focus'?0.9:pace==='brisk'?1.06:1;return Math.max(0.5,Math.min(2,this.rate*factor));}
   setRate(rate:number){this.rate=Math.max(0.5,Math.min(2,rate));this.audio.playbackRate=this.effectiveRate();}

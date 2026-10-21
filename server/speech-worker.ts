@@ -50,7 +50,11 @@ export class LocalSpeechWorker implements SpeechEngine {
     const id=randomUUID();
     return new Promise<Buffer>((resolvePromise,rejectPromise)=>{
       const abort=()=>{this.child?.stdin.write(JSON.stringify({cancel:id})+'\n')};
-      const timer=setTimeout(()=>{this.child?.kill('SIGKILL');finish(new Error('Local narration took too long. Press Play to retry.'));},180000);
+      const timer=setTimeout(()=>{
+        // Forget the stuck process now, not when its close event arrives: the next queued request must start a fresh one.
+        const stuck=this.child;this.child=undefined;this.state={state:'error',message:'Local narration took too long. Press Play to retry.'};stuck?.kill('SIGKILL');
+        finish(new Error('Local narration took too long. Press Play to retry.'));
+      },180000);
       const finish=(error?:Error,data?:Buffer)=>{
         clearTimeout(timer);signal.removeEventListener('abort',abort);this.pending=undefined;
         if (signal.aborted) rejectPromise(new DOMException('Narration aborted','AbortError'));

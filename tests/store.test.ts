@@ -49,6 +49,15 @@ describe('library folders', () => {
     id: 'source-1', title: 'Attention article', kind: 'article', url: 'https://example.com/a', markdown: '# Attention\n\nText.', rawHtml: '<p>Text</p>', warnings: [],
     inventory: { images: 1, inlineSvg: 0, tables: 0, savedVisuals: 1 },
     assets: [{ id: 'source-asset-0', kind: 'image', alt: 'Attention map', caption: '', src: '/api/source-assets/' + blob.id, originalSrc: '/api/source-assets/' + blob.id }] }] });
+  it('lists the rest of the library when one hand-edited folder is unreadable', () => {
+    const { store } = setup();
+    store.saveBundle(bundle(), [blob]); store.saveBundle({ ...bundle(), id: 'other', title: 'Other notes' }, [blob]);
+    const sources = join(store.libraryRoot, 'other-notes', 'sources');
+    rmSync(sources, { recursive: true, force: true }); writeFileSync(sources, 'not a folder');
+    const list = store.listBundles();
+    expect(list.find(item => item.id === 'attention-notes')?.broken).toBeUndefined();
+    expect(list.find(item => item.id === 'other-notes')?.broken).toBeTruthy();
+  });
   it('defaults the library next to the database', () => {
     const { store, path } = setup();
     expect(store.libraryRoot).toBe(join(dirname(path), 'library'));

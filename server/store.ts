@@ -175,8 +175,8 @@ export class LessonStore {
         summaries.push({ id: slug, title: bundle.title, createdAt: bundle.createdAt, status: bundle.status, lessonId: bundle.lessonId,
           sourceCount: bundle.sources.length, visualCount: bundle.sources.reduce((sum, source) => sum + source.inventory.savedVisuals, 0), warningCount: bundle.sources.reduce((sum, source) => sum + source.warnings.filter(warning => warning.kind === 'blocking').length, 0) });
       } catch (caught) {
-        if (!(caught instanceof StoreError)) throw caught;
-        summaries.push({ id: slug, title, createdAt: item?.createdAt ?? '', status: 'needs-review', sourceCount: 0, visualCount: 0, warningCount: 0, broken: caught.message });
+        // Any problem in one hand-edited folder marks only that item broken; the rest of the library still lists.
+        summaries.push({ id: slug, title, createdAt: item?.createdAt ?? '', status: 'needs-review', sourceCount: 0, visualCount: 0, warningCount: 0, broken: caught instanceof Error ? caught.message : String(caught) });
       }
     }
     return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));

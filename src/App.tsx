@@ -65,7 +65,8 @@ export default function App() {
     // A background refresh (e.g. a finished preparation) must not remount the open reader: that stops narration and loses scroll.
     const route = (selected ?? '') + '|' + (sourceId ?? ''); const navigated = route !== shownRoute.current;
     let cancelled = false;
-    if (navigated) { setLoading(true); setError(''); setLesson(null); setBundle(null); }
+    // Until this navigation lands nothing is shown, so going Back mid-load counts as a navigation too (not a background refresh of a stale route).
+    if (navigated) { shownRoute.current = null; setLoading(true); setError(''); setLesson(null); setBundle(null); }
     Promise.all([api.list(), selected && navigated ? api.lesson(selected) : Promise.resolve(null), api.bundles(), sourceId ? api.bundle(sourceId) : Promise.resolve(null)]).then(([list, document, sources, collection]) => {
       if (cancelled) return;
       setLessons(list); setBundles(sources); setBundle(collection);

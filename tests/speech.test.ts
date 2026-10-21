@@ -104,3 +104,12 @@ it('returns ephemeral audio directly over HTTP with no-store and no saved-audio 
   const missing=await fetch(base+'/api/speech/audio/'+'a'.repeat(64));expect(missing.status).toBe(404);await missing.text();
  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await service.close();}
 });
+it('cancelled queued requests stop counting toward the busy limit right away',async()=>{
+ let release!:(b:Buffer)=>void; let calls=0; const {service,request}=await setup(()=>{calls++;return new Promise(r=>release=r)});
+ const first=service.render(request,new AbortController().signal);
+ const skipped=Array.from({length:7},()=>{const c=new AbortController();const p=service.render(request,c.signal);p.catch(()=>{});c.abort();return p});
+ const next=service.render(request,new AbortController().signal);
+ await expect.poll(()=>!!release).toBe(true); release(wav()); await first;
+ await expect.poll(()=>calls).toBe(2); release(wav());
+ expect(await next).toEqual(wav()); await Promise.allSettled(skipped); expect(calls).toBe(2);
+});

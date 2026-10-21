@@ -463,7 +463,7 @@ export class PreparationService {
         const reviewable:Pending[]=[];
         for(const item of batch){
           const structured=authoredById.get(item.task.id)!;
-          const authoredTeaching=authoredSectionSchema.parse({...structured,units:structured.units.map(unit=>({...unit,question:unit.question??undefined}))});
+          const authoredTeaching=authoredSectionSchema.parse({...structured,units:structured.units.map(unit=>({...unit,question:unit.question?.trim()||undefined}))});
           item.issues=checkTeaching(item.task,authoredTeaching);
           item.teaching=item.issues.length?authoredTeaching:normalizeTeaching(authoredTeaching);
           if(item.issues.length){await mark(item,{state:'waiting'});queue.push(item)}else{await mark(item,{state:'reviewing'});reviewable.push(item)}
@@ -506,7 +506,7 @@ export class PreparationService {
         active.stage = issues.length ? `Revising ${index}/${tasks.length} · draft ${draft} · ${progressIssue(issues)}` : `Writing ${index}/${tasks.length} · draft ${draft} · ${task.section.title}`;
         await mark({ state: 'writing', error: undefined }, true);
         const structured = agentSectionSchema.parse(await run('author', task.id, instruction + (issues.length ? '\n' + prompt('revision', { issues, draft: teaching }) : ''), agentSectionSchema, images));
-        const authoredTeaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question ?? undefined })) });
+        const authoredTeaching = authoredSectionSchema.parse({ ...structured, units: structured.units.map(u => ({ ...u, question: u.question?.trim() || undefined })) });
         issues = checkTeaching(task, authoredTeaching);
         teaching = issues.length ? authoredTeaching : normalizeTeaching(authoredTeaching);
         if (issues.length) continue;

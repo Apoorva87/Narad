@@ -414,3 +414,7 @@ it('frees the slot and marks the item failed when settings cannot be read while 
  expect(t.service.start('light','codex').status).toBe('running');await expect.poll(()=>g.held('light')).toBe(true);g.release('light');
  await expect.poll(()=>t.job('light')?.status).toBe('completed');expect(g.started).toEqual(['time','light']);
 });
+it('treats a blank host question from the agent as no question instead of failing the run',async()=>{
+ const {service}=await setup(async r=>{const base=await answer(r) as any;return r.kind==='author'?{...base,units:base.units.map((u:any)=>({...u,question:'  '}))}:base});
+ service.start('source','codex');expect((await finished(service)).status).toBe('completed');
+});

@@ -78,3 +78,11 @@ it('can insert expanded replies after the current passage without restarting its
  expect(controller.replaceItems(withReply)).toBe(true);expect(audio.currentTime).toBe(.35);expect(audio.paused).toBe(false);
  audio.onended!();await tick();expect(audio.played[1]).toContain('question');controller.dispose();
 });
+it('keeps prefetched audio when polling rebuilds the same items, so no chunk is rendered twice',async()=>{
+ const audio=new TestAudio();const rendered:string[]=[];const released:string[]=[];
+ const controller=new NarrationController(audio,async item=>{const id=`${item.blockId}-${item.chunk}`;rendered.push(id);return {url:'/'+id,release:()=>released.push(id)}},()=>{});
+ controller.start(items,0,1);await tick();
+ for(let poll=0;poll<3;poll++)expect(controller.replaceItems(structuredClone(items))).toBe(true);
+ expect(released).toEqual([]);audio.onended!();await tick();
+ expect(rendered.filter(id=>id===rendered[1])).toHaveLength(1);controller.dispose();
+});

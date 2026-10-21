@@ -82,3 +82,16 @@ it('formats the usage line with cost only when known', async () => {
   expect(usageLine({ inputTokens: 900, outputTokens: 12 })).toBe('Tokens: 900 in · 12 out');
   expect(usageLine({ inputTokens: 900, outputTokens: 12, partial: true })).toBe('Tokens: 900 in · 12 out · coordinator only; subagent tokens not reported');
 });
+it('retries resource exhaustion up to four times with pauses, and stops waiting when cancelled', async () => {
+  const exhausted = 'Agent failed. failed to spawn thread: Os { code: 11, kind: WouldBlock, message: "Resource temporarily unavailable" }';
+  let n = 0; const dir = await tmp(); const records: CallRecord[] = [];
+  const runner = new CallRunner(dir, fake(async () => { if (++n < 4) throw new Error(exhausted); return { ok: true }; }), async c => { records.push(c); }, [1, 1, 1]);
+  expect(await runner.run(input(), new AbortController().signal)).toEqual({ ok: true });
+  expect(n).toBe(4); expect(records[0].outcome).toBe('retried');
+  n = 0; const failing = new CallRunner(dir, fake(async () => { n++; throw new Error(exhausted); }), async c => { records.push(c); }, [1, 1, 1]);
+  await expect(failing.run(input(), new AbortController().signal)).rejects.toThrow(/Resource temporarily unavailable/); expect(n).toBe(4);
+  const ac = new AbortController(); n = 0;
+  const slow = new CallRunner(dir, fake(async () => { n++; setTimeout(() => ac.abort(), 5); throw new Error(exhausted); }), async c => { records.push(c); }, [60_000]);
+  const started = Date.now(); await expect(slow.run(input(), ac.signal)).rejects.toThrow(); expect(Date.now() - started).toBeLessThan(5_000); expect(n).toBe(1);
+  expect(records.at(-1)?.outcome).toBe('failed');
+});

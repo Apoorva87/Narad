@@ -96,6 +96,13 @@ describe('media helpers', () => {
 });
 
 describe('renderCredits', () => {
+  it('writes credits for a media link whose name has a stray %', async () => {
+    const { renderCredits } = await import('../server/library-render');
+    const inventory = { images: 0, inlineSvg: 0, tables: 0, savedVisuals: 0 };
+    const credits = renderCredits({ title: 'T', sources: [{ id: 'a', title: 'A', kind: 'article', url: 'https://example.com', markdown: '', warnings: [], inventory, assets: [
+      { id: 'v', kind: 'video', alt: 'Demo', caption: 'Demo', video: { provider: 'youtube', url: 'https://example.com/clips/demo%zz', embedUrl: 'https://example.com/embed' } }] }] });
+    expect(credits).toContain('`demo%zz`');
+  });
   it('lists every image, video and upload from its credit, grouped by source page, with lesson-only credits too', async () => {
     const { renderCredits } = await import('../server/library-render');
     const { minimalLesson } = await import('./fixture');

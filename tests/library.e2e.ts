@@ -331,3 +331,16 @@ test('a tutor draft in the presentation panel stays with its passage', async ({ 
   await stage.getByRole('button', { name: 'Back to current passage' }).click();
   await expect(stage.locator('.presentation-ask').getByLabel('Question for the tutor')).toHaveValue('');
 });
+
+test('going Back while a lesson is still loading returns to the library instead of a stuck spinner', async ({ page, request }) => {
+  const lesson = minimalLesson(); lesson.id = 'slow-open'; lesson.title = 'Slow to open';
+  expect((await request.post('/api/lessons', { data: lesson })).ok()).toBe(true);
+  await page.goto('/');
+  await expect(page.locator('.library-row').filter({ hasText: 'Slow to open' })).toBeVisible();
+  await page.route('**/api/lessons/slow-open', async route => { await new Promise(done => setTimeout(done, 1500)); await route.continue(); });
+  await page.evaluate(() => { location.hash = 'lesson/slow-open'; });
+  await expect(page.getByRole('status').filter({ hasText: 'Opening your library' })).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('.library-row').filter({ hasText: 'Slow to open' })).toBeVisible({ timeout: 4000 });
+  await expect(page.getByRole('status').filter({ hasText: 'Opening your library' })).toHaveCount(0);
+});

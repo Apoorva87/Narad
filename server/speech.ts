@@ -31,13 +31,16 @@ export class SpeechService {
     if (this.closed) throw new StoreError('Speech is shutting down.',503);
     if (this.pending>=8) throw new StoreError('Speech is busy. Try again in a moment.',429);
     const checkActive=()=>{signal.throwIfAborted();if(this.closed)throw new StoreError('Speech is shutting down.',503)};
-    this.pending++;
+    signal.throwIfAborted();
+    // A cancelled request (the listener skipped ahead) stops counting toward the busy limit at once, not when its queue turn comes.
+    let counted=true;const release=()=>{if(counted){counted=false;this.pending--}};
+    this.pending++;signal.addEventListener('abort',release,{once:true});
     const work=this.queue.then(async()=>{
       checkActive();
       const bytes=await this.engine.synthesize(text,voice,style,signal);
       checkActive(); wavDuration(bytes);
       return bytes;
-    }).finally(()=>{this.pending--});
+    }).finally(()=>{signal.removeEventListener('abort',release);release()});
     this.queue=work.then(()=>undefined,()=>undefined);
     return work;
   }

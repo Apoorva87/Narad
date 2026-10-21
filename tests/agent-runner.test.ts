@@ -63,3 +63,24 @@ it('sums turn.completed usage from Codex JSONL and ignores everything else',()=>
  expect(codexUsage(out,true)).toEqual({inputTokens:150,outputTokens:15,cachedTokens:60,partial:true});
  expect(codexUsage('garbage\n{}')).toBeUndefined();
 });
+it('delivers all output of a CLI that exits right after a large write',async()=>{
+ const size=400_000;
+ const runs=await Promise.all(Array.from({length:12},()=>executeProcess({command:process.execPath,args:['-e',`process.stdout.write('x'.repeat(${size}))`],cwd:process.cwd(),input:'',signal:new AbortController().signal,timeoutMs:10_000})));
+ for(const r of runs)expect(r.stdout.length).toBe(size);
+},30_000);
+it('keeps a complete Codex answer when Codex crashes while exiting, but not a stale one from an earlier attempt',async()=>{
+ const { mkdtemp, writeFile, chmod, rm } = await import('node:fs/promises');
+ const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+ const { cliRunner } = await import('../server/agent-runner'); const { secureAgentPrompt } = await import('../server/prompt-security');
+ const dir=await mkdtemp(join(tmpdir(),'narad-codex-'));const bin=join(dir,'codex');const previous=process.env.NARAD_CODEX_BIN;
+ const request={provider:'codex' as const,kind:'author' as const,prompt:secureAgentPrompt('Write.','codex'),schema:{type:'object'},cwd:dir,name:'001-author-x',images:[]};
+ try{
+  process.env.NARAD_CODEX_BIN=bin;
+  await writeFile(bin,`#!${process.execPath}\nconst a=process.argv;const out=a[a.indexOf('--output-last-message')+1];\nif(process.env.WRITE_ANSWER)require('fs').writeFileSync(out,JSON.stringify({ok:true}));\nconsole.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:7,output_tokens:3}}));\nprocess.stderr.write("thread 'tokio-rt-worker' panicked at notify-8.2.0/src/inotify.rs:609:51");process.exit(134);\n`);await chmod(bin,0o755);
+  process.env.WRITE_ANSWER='1';const usage:unknown[]=[];
+  expect(await cliRunner.run(request,new AbortController().signal,undefined,u=>usage.push(u))).toEqual({ok:true});
+  expect(usage).toEqual([{inputTokens:7,outputTokens:3}]);
+  delete process.env.WRITE_ANSWER;
+  await expect(cliRunner.run(request,new AbortController().signal)).rejects.toThrow(/Agent failed.*inotify/s);
+ }finally{if(previous===undefined)delete process.env.NARAD_CODEX_BIN;else process.env.NARAD_CODEX_BIN=previous;delete process.env.WRITE_ANSWER;await rm(dir,{recursive:true,force:true})}
+});

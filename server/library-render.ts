@@ -25,7 +25,9 @@ type Creditable = { kind?: string; src?: string; alt: string; caption: string; c
 const fileName = (asset: Creditable) => {
   const from = asset.src ?? asset.video?.url ?? asset.credit?.mediaUrl ?? '';
   if (from.startsWith('data:')) return '';
-  return decodeURIComponent(from.split(/[?#]/)[0].split('/').pop() ?? '');
+  const last = from.split(/[?#]/)[0].split('/').pop() ?? '';
+  // A stray % (e.g. a hand-pasted video link) is not valid percent-encoding; show the name as written instead of failing the save.
+  try { return decodeURIComponent(last); } catch { return last; }
 };
 function entry(asset: Creditable): string {
   const credit = asset.credit;

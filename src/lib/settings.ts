@@ -12,7 +12,8 @@ function merge(base: Settings, patch: Patch): Settings {
 }
 /** Server-saved settings for the whole app; defaults apply until the first load finishes. */
 export function useSettings(): Settings {
-  if (!loading) loading = api.settings().then(response => publish(response.settings)).catch(() => { loading = undefined; });
+  // While the server is unreachable, try again at most every few seconds rather than on every render (narration re-renders several times a second).
+  if (!loading) loading = api.settings().then(response => publish(response.settings)).catch(() => { setTimeout(() => { loading = undefined; }, 5000); });
   return useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => current);
 }
 /** Applies immediately, then saves; a rejected save restores the previous values and rethrows. */

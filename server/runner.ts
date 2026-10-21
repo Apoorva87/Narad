@@ -6,6 +6,16 @@ import { addUsage, type AgentUsage, type Provider } from '../shared/preparation'
 import type { AgentRunner } from './agent-runner';
 
 export type CallRecord = { n: number; step: string; task: string; startedAt: string; durationMs: number; outcome: 'ok' | 'retried' | 'failed'; error?: string; usage?: AgentUsage };
+/** Failures caused by the machine or network rather than the prompt: worth retrying after a pause instead of immediately. */
+const transient = /Resource temporarily unavailable|failed to spawn thread|creating threadpool failed|EAGAIN|ENOMEM|ECONNRESET|ETIMEDOUT|socket hang up|stream disconnected|\b(429|502|503|504)\b|rate.?limit|overloaded/i;
+/** Pause before retry n (1-based) of a transient failure; the run stops after the last. */
+export const transientRetryDelays = [15_000, 45_000, 90_000];
+const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  const done = () => { clearTimeout(timer); reject(signal.reason); };
+  const timer = setTimeout(() => { signal.removeEventListener('abort', done); resolve(); }, ms);
+  signal.addEventListener('abort', done, { once: true });
+});
+
 export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
 
 /**
@@ -15,7 +25,7 @@ export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; ta
  */
 export class CallRunner {
   private next: number;
-  constructor(private dir: string, private runner: AgentRunner, private record: (call: CallRecord) => Promise<void>) {
+  constructor(private dir: string, private runner: AgentRunner, private record: (call: CallRecord) => Promise<void>, private delays = transientRetryDelays) {
     mkdirSync(join(dir, 'calls'), { recursive: true });
     const numbers = readdirSync(join(dir, 'calls')).map(f => /^(\d+)-/.exec(f)).filter((m): m is RegExpExecArray => !!m).map(m => Number(m[1]));
     this.next = Math.max(0, ...numbers) + 1;
@@ -49,7 +59,9 @@ export class CallRunner {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push(message);
-        if (signal.aborted || attempt === 2) { await finish('failed', message); throw error; }
+        const retries = transient.test(message) ? this.delays.length : 1;
+        if (signal.aborted || attempt > retries) { await finish('failed', message); throw error; }
+        if (transient.test(message)) await pause(this.delays[attempt - 1], signal).catch(async () => { await finish('failed', message); throw error; });
       }
     }
   }

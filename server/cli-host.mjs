@@ -13,5 +13,6 @@ process.on('message', message => {
   child.stdin.on('error', () => {});
   child.once('spawn', () => { process.send?.({ type: 'started', pid: child.pid }); child.stdin.end(message.input); });
   child.once('error', error => { process.stderr.write(error.message); process.exitCode = 1; process.disconnect(); });
-  child.once('close', code => { process.send?.({ type: 'finished', code }); terminateGroup(); });
+  // Pipe writes are asynchronous on macOS: let everything already piped reach the server before the group is killed.
+  child.once('close', code => { process.send?.({ type: 'finished', code }); process.stdout.write('', () => process.stderr.write('', terminateGroup)); });
 });

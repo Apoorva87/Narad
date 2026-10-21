@@ -1,6 +1,6 @@
 import { fork } from 'node:child_process';
 import { accessSync, constants, openSync, appendFileSync, closeSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Provider, PreparationState, AgentUsage } from '../shared/preparation';
@@ -78,9 +78,19 @@ export const cliRunner:AgentRunner={
     if(!hasFixedPromptPolicy(request.prompt))throw new Error('Agent request is missing Narad fixed prompt policy.');
     const schemaPath=join(request.cwd,request.name+'.schema.json');const outputPath=join(request.cwd,request.name+'.result.json');
     await writeFile(schemaPath,JSON.stringify(request.schema));await writeFile(join(request.cwd,request.name+'.prompt.txt'),request.prompt);
-    const log=openSync(join(request.cwd,request.name+'.events.log'),'w');
+    // Codex writes its final answer here only when it finishes, so a file left by an earlier attempt must not be mistaken for this one's.
+    await rm(outputPath,{force:true});
+    const eventsPath=join(request.cwd,request.name+'.events.log');const log=openSync(eventsPath,'w');
     let result:{stdout:string;stderr:string};
-    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model,multiAgent:request.multiAgent,reasoningEffort:request.reasoningEffort}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); } finally { closeSync(log); }
+    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model,multiAgent:request.multiAgent,reasoningEffort:request.reasoningEffort}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); }
+    catch(error) {
+      // Codex can panic while shutting down (its file watcher) after it has written a complete answer; keep that answer.
+      // The caller still validates it against the schema, so a truncated or wrong file is retried as before.
+      if(signal.aborted||request.provider!=='codex'||!(error instanceof Error)||!error.message.startsWith('Agent failed.'))throw error;
+      try{JSON.parse(await readFile(outputPath,'utf8'))}catch{throw error}
+      result={stdout:await readFile(eventsPath,'utf8').catch(()=>''),stderr:''};
+    }
+    finally { closeSync(log); }
     signal.throwIfAborted();
     let value:unknown;
     if(request.provider==='codex') {try{const usage=codexUsage(result.stdout,request.multiAgent);if(usage)onUsage?.(usage)}catch{/* usage is best effort */}value=JSON.parse(await readFile(outputPath,'utf8'));}
