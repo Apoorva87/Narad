@@ -80,7 +80,7 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
   for(const asset of task.assets) if(!teaching.visuals.some(v=>v.id===asset.id)) issues.push('Missing visual '+asset.id);
   for (const visual of teaching.visuals) {
     noSpeakerLabel(`Visual ${visual.id} caption`,visual.caption);noSpeakerLabel(`Visual ${visual.id} explanation`,visual.explanation);noSpeakerLabel(`Visual ${visual.id} spoken explanation`,visual.spokenText);
-    if (visual.dialogueTurns && (!visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert'))) issues.push('Visual '+visual.id+' needs both host and expert dialogue turns.');
+    if (!visual.dialogueTurns || !visual.dialogueTurns.some(t=>t.role==='host') || !visual.dialogueTurns.some(t=>t.role==='expert')) issues.push('Visual '+visual.id+' needs host and expert dialogue turns for the tutor mode.');
     visual.dialogueTurns?.forEach((turn,index)=>{
       if(generatedSpeakerLabel.test(turn.markdown)||generatedSpeakerLabel.test(turn.spokenText))issues.push(`Visual ${visual.id} turn ${index+1} must contain only the utterance; role already identifies the speaker, so omit labels.`);
     });
