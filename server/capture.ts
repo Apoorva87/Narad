@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import type { CapturedSource, AssetBlob, SourceAsset, VideoRef, Credit } from '../shared/sources';
 import { downloadPublic } from './download';
 import { portableTextArticle } from './capture-portable-text';
+import { articleBody, tidyArticle, withoutTracking } from './capture-tidy';
 export type Download = (url: string) => Promise<{ bytes: Buffer; type: string; url: string }>;
 export function assetBlob(bytes: Buffer, type: string): AssetBlob {
   return { id: createHash('sha256').update(bytes).digest('hex'), bytes, type };
@@ -64,25 +65,28 @@ export async function captureArticle(url: string, download: Download = downloadP
   if (!/text\/html|application\/xhtml\+xml/i.test(response.type)) throw new Error('This link is not an HTML article. Add a webpage link or upload an image.');
   const html = response.bytes.toString('utf8');
   const $ = load(html);
-  const root = $('article').length ? $('article').first() : $('main').length ? $('main').first() : $('body');
+  const page = $('article').length ? $('article').first() : $('main').length ? $('main').first() : $('body');
+  const pageUrl = withoutTracking(response.url);
   const source: CapturedSource = { id: randomUUID(), title: $('h1').first().text().trim() || $('title').text().trim() || new URL(url).hostname,
-    kind: 'article', url: response.url, rawHtml: html, markdown: '', assets: [], warnings: [],
-    inventory: { images: root.find('img').length, inlineSvg: root.find('svg').filter((_i, node) => $(node).parents('svg').length === 0).length, tables: root.find('table').length, savedVisuals: 0 } };
-  root.find('script[type^="math/tex"]').each((_i, node) => {
+    kind: 'article', url: pageUrl, rawHtml: html, markdown: '', assets: [], warnings: [], inventory: { images: 0, inlineSvg: 0, tables: 0, savedVisuals: 0 } };
+  page.find('script[type^="math/tex"]').each((_i, node) => {
     const element = $(node);
     element.replaceWith($('<span>').attr('data-narad-math', element.text()).attr('data-display', element.attr('type')?.includes('mode=display') ? 'block' : 'inline').text(element.text()));
   });
-  root.find('script, style, nav, button, noscript, form').remove();
+  page.find('script, style, nav, button, noscript, form').remove();
+  // Teach only the article: its marked body when there is one, without page chrome (share bars, bios, comments, …).
+  const root = articleBody($, page); tidyArticle($, root, response.url);
+  source.inventory = { images: root.find('img').length, inlineSvg: root.find('svg').filter((_i, node) => $(node).parents('svg').length === 0).length, tables: root.find('table').length, savedVisuals: 0 };
   // Next.js/Sanity pages may render text but leave figures in the RSC payload; rebuild the body from it then.
   if (!root.find('img, svg, picture, video, iframe, canvas').length && root.text().trim()) {
     const article = portableTextArticle(html, root.text(), source.title);
     if (article) {
       root.html(article.html);
       source.inventory = { images: root.find('img').length, inlineSvg: 0, tables: 0, savedVisuals: 0 };
-      for (const type of article.skipped) source.warnings.push({ kind: 'info', message: 'A "' + type + '" block in the article body could not be captured. Open the original: ' + response.url });
+      for (const type of article.skipped) source.warnings.push({ kind: 'info', message: 'A "' + type + '" block in the article body could not be captured. Open the original: ' + pageUrl });
     }
   }
-  if (root.find('audio').length) source.warnings.push({ kind: 'info', message: 'This page includes audio that a static capture cannot keep. Check the original: ' + response.url });
+  if (root.find('audio').length) source.warnings.push({ kind: 'info', message: 'This page includes audio that a static capture cannot keep. Check the original: ' + pageUrl });
   if (root.find('td[colspan], td[rowspan], th[colspan], th[rowspan]').length) source.warnings.push({ kind: 'info', message: 'A table contains merged cells. Its preview is flattened; consult the original for row and column grouping.' });
   const blobs: AssetBlob[] = []; let downloadedBytes = response.bytes.length;
   // Interactive elements cannot be kept; leave a marker and say so. Done before collecting visuals so images inside them are not registered.
@@ -99,7 +103,7 @@ export async function captureArticle(url: string, download: Download = downloadP
     const inside = block.length > 0 && ['li', 'td', 'th'].includes(block.prop('tagName')?.toLowerCase() ?? '');
     if (block.length && block.closest(root).length) { if (inside) block.append(marker()); else block.after(marker()); element.remove(); }
     else element.replaceWith(marker());
-    source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + response.url });
+    source.warnings.push({ kind: 'info', message: 'An interactive figure could not be kept. Open the original: ' + pageUrl });
   });
   // Videos stream from their source: resolve each to a link now, and drop any that cannot be streamed.
   root.find('video, iframe').each((_i, node) => {
@@ -107,7 +111,7 @@ export async function captureArticle(url: string, download: Download = downloadP
     if (node.tagName === 'iframe' ? !isVideoFrame(element.attr('src'), response.url) : element.parents('video').length > 0) return;
     const ref = videoRef(node.tagName === 'iframe' ? element.attr('src') : element.attr('src') || element.find('source[src]').first().attr('src'), response.url);
     if (ref) element.attr('data-narad-video', JSON.stringify(ref));
-    else { element.replaceWith(marker()); source.warnings.push({ kind: 'info', message: 'A video here could not be streamed (it needs a secure link). Open the original: ' + response.url }); }
+    else { element.replaceWith(marker()); source.warnings.push({ kind: 'info', message: 'A video here could not be streamed (it needs a secure link). Open the original: ' + pageUrl }); }
   });
   const licenseOf = () => {
     const link = $('link[rel~="license"], a[rel~="license"]').first().attr('href') || $('a[href*="creativecommons.org/licenses"]').first().attr('href');
@@ -135,7 +139,7 @@ export async function captureArticle(url: string, download: Download = downloadP
     if (isSvg && /^[\d.]+em$/.test(element.attr('width') ?? '')) asset.widthEm = Math.min(100, parseFloat(element.attr('width')!));
     const rawSrc = isVideo ? element.attr('poster') : element.attr('data-src') || element.attr('src') || element.attr('data-original');
     const creditLine = creditLineOf(element);
-    asset.credit = { pageTitle: source.title, pageUrl: response.url, ...(video && { mediaUrl: video.url }), ...(caption && { caption }), ...(creditLine && { creditLine }), ...(license && { license }), capturedAt };
+    asset.credit = { pageTitle: source.title, pageUrl, ...(video && { mediaUrl: video.url }), ...(caption && { caption }), ...(creditLine && { creditLine }), ...(license && { license }), capturedAt };
     source.assets.push(asset);
     element.replaceWith($('<img>').attr('src', asset.id).attr('alt', asset.alt));
     return async () => {
@@ -210,10 +214,11 @@ export async function captureArticle(url: string, download: Download = downloadP
       return '\n\n' + (caption ? caption + '\n\n' : '') + [format(header), format(Array(count).fill('---')), ...values.map(format)].join('\n') + '\n\n';
     },
   });
-  source.markdown = converter.turndown(root.html() ?? '');
+  // Headings become section titles: no bold markers around the whole heading, no trailing (non-breaking) spaces.
+  source.markdown = converter.turndown(root.html() ?? '').replace(/^(#{1,6}) +(?:\*\*|__)(.+?)(?:\*\*|__)[ \t\u00a0]*$/gm, '$1 $2').replace(/^(#{1,6} .*?)[ \t\u00a0]+$/gm, '$1');
   if (!source.markdown.trim()) source.warnings.push({ kind: 'blocking', message: 'No readable article content was found. This page may require JavaScript or a sign-in.' });
   if (!source.assets.length && /\b(?:figures?|figs?)\s*(?:no\.?\s*)?\d+\b/i.test(source.markdown)) {
-    source.warnings.push({ kind: 'blocking', message: 'The article references numbered figures, but no visual assets were captured. The source may load figures dynamically or use an unsupported image delivery method; inspect the original page and add the figures before preparing. ' + response.url });
+    source.warnings.push({ kind: 'blocking', message: 'The article references numbered figures, but no visual assets were captured. The source may load figures dynamically or use an unsupported image delivery method; inspect the original page and add the figures before preparing. ' + pageUrl });
   }
   return { source, blobs };
 }

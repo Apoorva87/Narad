@@ -10,6 +10,8 @@ export interface AudioPort {
 }
 type Render=(item:NarrationItem,signal:AbortSignal)=>Promise<SpeechAudio>;
 type PrefetchedAudio={promise:Promise<SpeechAudio|undefined>;audio?:SpeechAudio};
+/** Chunks rendered ahead of playback (about a minute of speech): the local model runs ~4× real time, so this stays full even while a tutor answer renders. */
+const prefetchAhead=6;
 
 /** One owner for audio and async generations. Old results never regain playback ownership. */
 export class NarrationController {
@@ -91,14 +93,21 @@ export class NarrationController {
       await this.audio.play();if(generation!==this.generation||this.disposed)return;
       this.update('playing');
       report();
-      for(let next=this.index+1;next<=this.index+3;next++){
-        if(!this.items[next]||this.prefetched.has(next))continue;
+      // One request at a time: the speech server renders sequentially anyway, and parallel requests would hold
+      // the browser's few connections to this server, stalling tutor and library requests behind narration.
+      let previous:Promise<unknown>=Promise.resolve();const signal=this.abort.signal;
+      for(let next=this.index+1;next<=this.index+prefetchAhead;next++){
+        const item=this.items[next];if(!item)break;
+        const existing=this.prefetched.get(next);if(existing){previous=existing.promise;continue}
         const entry:PrefetchedAudio={promise:Promise.resolve(undefined)};
-        entry.promise=this.render(this.items[next],this.abort.signal).then(audio=>{
-          if(generation!==this.generation||this.disposed){audio.release();return undefined;}
-          entry.audio=audio;return audio;
+        entry.promise=previous.then(()=>{
+          if(generation!==this.generation||this.disposed||signal.aborted)return undefined;
+          return this.render(item,signal).then(audio=>{
+            if(generation!==this.generation||this.disposed){audio.release();return undefined;}
+            entry.audio=audio;return audio;
+          });
         }).catch(()=>undefined);
-        this.prefetched.set(next,entry);
+        previous=entry.promise;this.prefetched.set(next,entry);
       }
     } catch {if(generation===this.generation&&!this.disposed)this.update('error','Playback was blocked. Press Play to continue.');}
   }

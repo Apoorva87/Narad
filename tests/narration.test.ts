@@ -7,12 +7,12 @@ class TestAudio implements AudioPort {
  async play(){this.paused=false;this.played.push(this.src)} pause(){this.paused=true} load(){} removeAttribute(){this.src=''}
 }
 const tick=()=>new Promise(r=>setTimeout(r,0));
-it('buffers three following segments in memory after playback begins',async()=>{
+it('buffers six following segments in memory after playback begins',async()=>{
  const audio=new TestAudio();const requested:number[]=[];
- const buffered:NarrationItem[]=Array.from({length:5},(_,chunk)=>({...items[0],chunk}));
+ const buffered:NarrationItem[]=Array.from({length:9},(_,chunk)=>({...items[0],chunk}));
  const controller=new NarrationController(audio,async item=>{requested.push(item.chunk);return {url:`/${item.chunk}.wav`,release:()=>{}}},()=>{});
  controller.start(buffered,0,1);await tick();
- expect(requested).toEqual([0,1,2,3]);controller.dispose();
+ expect(requested).toEqual([0,1,2,3,4,5,6]);controller.dispose();
 });
 it('never plays a late response after navigating to a different passage',async()=>{
  const audio=new TestAudio();let release!:(v:any)=>void;const controller=new NarrationController(audio,(item)=>item.blockId==='one'?new Promise(r=>release=r):Promise.resolve({url:'/two.wav',release:()=>{}}),()=>{});
@@ -85,4 +85,11 @@ it('keeps prefetched audio when polling rebuilds the same items, so no chunk is 
  for(let poll=0;poll<3;poll++)expect(controller.replaceItems(structuredClone(items))).toBe(true);
  expect(released).toEqual([]);audio.onended!();await tick();
  expect(rendered.filter(id=>id===rendered[1])).toHaveLength(1);controller.dispose();
+});
+it('prefetches one chunk at a time so narration holds at most one server request',async()=>{
+ const audio=new TestAudio();let open=0,peak=0;const requested:number[]=[];
+ const buffered:NarrationItem[]=Array.from({length:9},(_,chunk)=>({...items[0],chunk}));
+ const controller=new NarrationController(audio,async item=>{open++;peak=Math.max(peak,open);requested.push(item.chunk);await new Promise(r=>setTimeout(r,2));open--;return {url:`/${item.chunk}.wav`,release:()=>{}}},()=>{});
+ controller.start(buffered,0,1);await expect.poll(()=>requested.length).toBe(7);
+ expect(peak).toBeLessThanOrEqual(1);expect(requested).toEqual([0,1,2,3,4,5,6]);controller.dispose();
 });

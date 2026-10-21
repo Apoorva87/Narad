@@ -272,7 +272,8 @@ describe('Next.js pages with Sanity portable text figures', () => {
     const { source, requested } = await run(page(pushes(payload), withImg));
     expect(requested).toEqual(['https://blog.example.com/post', 'https://blog.example.com/fig.png']);
     expect(source.assets.map(a => a.alt)).toEqual(['Static']);
-    expect(source.markdown).toContain('Related');
+    expect(source.markdown).toContain('Linear scaling');
+    expect(source.markdown).not.toContain('Another post about networking chips');
   });
   it('falls back to the plain text capture when the payload is malformed', async () => {
     const broken = payload.replace(/"body":\[/, '"body":[{"_type":"block",,');
