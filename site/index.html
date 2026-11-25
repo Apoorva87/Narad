@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Narad: a voice for your everyday learning</title>
+<meta name="description" content="Narad turns an article or a topic into a lesson you can read, hear and test yourself on. It runs on your own Mac.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<style>
+@font-face{font-family:Lora;font-weight:400;font-display:swap;src:url(fonts/lora-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:Lora;font-weight:400;font-style:italic;font-display:swap;src:url(fonts/lora-latin-400-italic.woff2) format("woff2")}
+@font-face{font-family:Lora;font-weight:500;font-display:swap;src:url(fonts/lora-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:Lora;font-weight:600;font-display:swap;src:url(fonts/lora-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"DM Sans";font-weight:400;font-display:swap;src:url(fonts/dm-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"DM Sans";font-weight:500;font-display:swap;src:url(fonts/dm-sans-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:"DM Sans";font-weight:600;font-display:swap;src:url(fonts/dm-sans-latin-600-normal.woff2) format("woff2")}
+
+:root{
+  --paper:#ffffff; --mist:#eef2fb; --ink:#17233b; --soft:#56657d; --line:#d9e0ee;
+  --blue:#244fc5; --brass:#b9801a; --leaf:#2f8f73; --night:#0e1626;
+  --serif:Lora,Georgia,"Times New Roman",serif; --sans:"DM Sans",-apple-system,"Segoe UI",sans-serif;
+  --page:1120px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+img{display:block;max-width:100%;height:auto}
+a{color:var(--blue)}
+a:focus-visible,button:focus-visible{outline:3px solid #8aa8f2;outline-offset:3px;border-radius:6px}
+h1,h2,h3{font-family:var(--serif);font-weight:500;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.4rem,5.6vw,4.1rem);line-height:1.08}
+h2{font-size:clamp(1.8rem,3.4vw,2.6rem);line-height:1.15}
+h3{font-size:1.3rem;line-height:1.3}
+p{margin:0}
+.wrap{max-width:var(--page);margin:0 auto;padding:0 28px}
+.lede{font-size:1.2rem;line-height:1.55;color:var(--soft);max-width:34em}
+.shot{border-radius:12px;border:1px solid var(--line);box-shadow:0 30px 60px -32px #17233b55}
+
+/* Top bar */
+.top{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+.brand{display:flex;align-items:center;gap:12px;font:600 1.35rem var(--sans);letter-spacing:-.02em;color:var(--ink);text-decoration:none}
+.brand img{width:36px;height:36px}
+.top nav{display:flex;gap:26px;font-size:.95rem}
+.top nav a{color:var(--soft);text-decoration:none}
+.top nav a:hover{color:var(--blue)}
+
+/* Hero: the strings of a veena stretch off the page beside the headline and are plucked once when the page opens. */
+.hero{position:relative;padding:54px 0 0;overflow:hidden}
+.strings{position:absolute;right:0;top:158px;height:200px;width:31%;pointer-events:none}
+.strings path{fill:none;stroke:var(--brass);stroke-width:1.2;opacity:.6;vector-effect:non-scaling-stroke}
+.hero-text{position:relative;max-width:800px}
+.hero .lede{margin-top:26px}
+.actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:32px}
+.button{display:inline-block;padding:13px 20px;border-radius:8px;font:500 1rem var(--sans);text-decoration:none;background:var(--blue);color:#fff;border:1px solid var(--blue)}
+.button:hover{background:#1c3fa3}
+.button.quiet{background:var(--paper);color:var(--ink);border-color:var(--line)}
+.button.quiet:hover{border-color:var(--blue);color:var(--blue);background:var(--paper)}
+.hero-shot{position:relative;margin:58px 0 0;border-radius:14px 14px 0 0;border:1px solid #26334d;border-bottom:0;box-shadow:0 -10px 70px -30px #17233b88}
+.hero-caption{background:var(--night);color:#aebbd2;font-size:.92rem;padding:16px 0 20px}
+.hero-caption .wrap{max-width:var(--page)}
+
+section{padding:104px 0}
+.intro{max-width:40em;margin-bottom:52px}
+.intro p{margin-top:18px;color:var(--soft);font-size:1.08rem}
+
+/* Three real steps, so they are numbered. */
+.steps{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:60px;align-items:center}
+.steps ol{list-style:none;margin:0;padding:0;counter-reset:step}
+.steps li{counter-increment:step;position:relative;padding:0 0 30px 58px}
+.steps li:last-child{padding-bottom:0}
+.steps li::before{content:counter(step);position:absolute;left:0;top:0;width:38px;height:38px;border-radius:50%;border:1px solid var(--brass);color:var(--brass);font:500 1.15rem/36px var(--serif);text-align:center}
+.steps li:not(:last-child)::after{content:"";position:absolute;left:19px;top:44px;bottom:4px;width:1px;background:var(--line)}
+.steps h3{margin-bottom:6px}
+.steps li p{color:var(--soft)}
+
+/* Four modes, one lesson */
+.modes{background:var(--mist)}
+.mode-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+.mode-tabs button{font:500 1rem var(--sans);color:var(--soft);background:transparent;border:1px solid transparent;border-radius:8px;padding:10px 16px;cursor:pointer}
+.mode-tabs button:hover{color:var(--ink)}
+.mode-tabs button[aria-selected=true]{background:var(--paper);color:var(--blue);border-color:var(--line)}
+.mode-note{min-height:3.3em;max-width:44em;margin-bottom:26px;font:400 1.15rem/1.55 var(--serif);color:var(--ink)}
+.mode-stage{position:relative}
+.mode-stage img{width:100%}
+.mode-stage img[hidden]{display:none}
+
+/* Course: uneven pieces, placed like pages on a desk */
+.course-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:34px 34px;align-items:start}
+.piece{margin:0}
+.piece img{border-radius:10px;border:1px solid var(--line)}
+.piece figcaption{margin-top:14px;color:var(--soft);font-size:1rem;max-width:30em}
+.piece figcaption strong{display:block;font:500 1.2rem var(--serif);color:var(--ink);margin-bottom:3px}
+.piece.worked{grid-column:1 / span 7}
+.piece.diagram{grid-column:9 / span 4;grid-row:1 / span 2}
+.piece.quiz{grid-column:2 / span 6}
+
+/* Listening */
+.listen{background:var(--night);color:#dfe6f2}
+.listen h2{color:#fff}
+.listen .intro p{color:#aebbd2}
+.listen-grid{display:grid;grid-template-columns:240px 240px minmax(0,1fr);gap:44px;align-items:center}
+.listen .shot{border-color:#2a3855;box-shadow:none}
+.phone{border-radius:28px;border:7px solid #232e45;overflow:hidden}
+.facts{display:grid;gap:26px;margin:0 0 0 20px;padding:0;list-style:none}
+.facts li{border-top:1px solid #2a3855;padding-top:18px;color:#aebbd2;font-size:1rem}
+.facts strong{display:block;color:#fff;font:500 1.15rem var(--serif);margin-bottom:4px}
+
+/* Tutor */
+.tutor-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:60px;align-items:center}
+.tutor-grid ul{margin:22px 0 0;padding:0 0 0 1.1em;color:var(--soft)}
+.tutor-grid li{margin-bottom:10px}
+
+/* Plain footing */
+.footing{background:var(--mist)}
+.footing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:60px}
+.footing h3{margin-bottom:14px}
+.footing ul{margin:0;padding:0 0 0 1.1em;color:var(--soft)}
+.footing li{margin-bottom:10px}
+pre{margin:22px 0 0;padding:20px 22px;background:var(--night);color:#e8edf6;border-radius:10px;overflow-x:auto;font:400 .92rem/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
+.note{margin-top:18px;font-size:.95rem;color:var(--soft)}
+footer{padding:44px 0 60px;color:var(--soft);font-size:.95rem}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px 28px;justify-content:space-between}
+
+@media(max-width:900px){
+  section{padding:72px 0}
+  .steps,.tutor-grid,.footing-grid{grid-template-columns:1fr;gap:40px}
+  .listen-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+  .facts{grid-column:1 / -1;margin:16px 0 0}
+  .piece.worked,.piece.diagram,.piece.quiz{grid-column:1 / -1;grid-row:auto}
+  .piece.diagram{max-width:420px}
+  .top nav{display:none}
+  .strings{display:none}
+}
+@media(max-width:520px){
+  .wrap{padding:0 20px}
+  .hero{padding-top:28px}
+  .hero-shot{margin-top:40px;border-radius:10px 10px 0 0}
+  .mode-tabs button{padding:9px 12px;font-size:.95rem}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <svg class="strings" viewBox="0 0 1600 200" preserveAspectRatio="none" aria-hidden="true">
+    <path data-y="25"/><path data-y="75"/><path data-y="125"/><path data-y="175"/>
+  </svg>
+  <div class="wrap">
+    <div class="top">
+      <a class="brand" href="#top"><img src="assets/narad-mark.svg" alt="">Narad</a>
+      <nav aria-label="On this page">
+        <a href="#modes">Four ways to learn</a>
+        <a href="#course">Course</a>
+        <a href="#listen">Listening</a>
+        <a href="#start">Get started</a>
+      </nav>
+    </div>
+    <div class="hero-text" id="top">
+      <h1>Turn an article into a lesson you can read, hear and test yourself on.</h1>
+      <p class="lede">Give Narad a link, a topic or a picture. It writes a faithful explanation, reads it to you in a natural voice, and checks that you understood. Everything runs on your own Mac.</p>
+      <div class="actions">
+        <a class="button" href="#modes">See what it does</a>
+        <a class="button quiet" href="https://github.com/Apoorva87/Narad">Get Narad on GitHub</a>
+      </div>
+    </div>
+    <img class="hero-shot" src="assets/presentation.webp" width="2560" height="1640" alt="Narad presenting a lesson on gradient descent: a diagram of one step on the left, and a multiple-choice question on the right that the voice is waiting for you to answer.">
+  </div>
+  <div class="hero-caption"><div class="wrap">A lesson in presentation mode. The voice has just asked a question and is waiting for an answer before it explains.</div></div>
+</header>
+
+<main>
+
+<section id="how">
+  <div class="wrap">
+    <div class="intro">
+      <h2>From a link to a lesson</h2>
+      <p>You bring the material. An AI agent you already use writes the lesson, and a second pass checks it against the source before you see it.</p>
+    </div>
+    <div class="steps">
+      <ol>
+        <li><h3>Add what you want to understand</h3><p>Paste article links, type a topic, or drop in images and plots. Say how much you already know.</p></li>
+        <li><h3>Narad prepares the lesson</h3><p>It saves the article and its figures, then writes each section and reviews it for missing facts, wrong numbers and unsupported claims.</p></li>
+        <li><h3>Read it, hear it, try it</h3><p>Open the finished lesson in any of four forms, listen to it, and ask about anything that is unclear.</p></li>
+      </ol>
+      <img class="shot" src="assets/add-lesson.webp" width="2560" height="1640" loading="lazy" alt="The Add a lesson dialog, with a box for ideas, notes or links, three learner levels, and a place to drop images.">
+    </div>
+  </div>
+</section>
+
+<section id="modes" class="modes">
+  <div class="wrap">
+    <div class="intro">
+      <h2>Four ways through the same material</h2>
+      <p>Every lesson is written four ways from the same reviewed source, so you can skim it, study it, hear it argued, or be taught it.</p>
+    </div>
+    <div class="mode-tabs" role="tablist" aria-label="Lesson forms">
+      <button role="tab" aria-selected="true" aria-controls="mode-panel" data-mode="summary">Quick summary</button>
+      <button role="tab" aria-selected="false" aria-controls="mode-panel" data-mode="walkthrough">Detailed walkthrough</button>
+      <button role="tab" aria-selected="false" aria-controls="mode-panel" data-mode="dialogue">Tutor dialogue</button>
+      <button role="tab" aria-selected="false" aria-controls="mode-panel" data-mode="course">Course</button>
+    </div>
+    <div id="mode-panel" role="tabpanel">
+      <p class="mode-note" aria-live="polite">A few sentences per source, then how the sources fit together. Enough to decide whether to go deeper.</p>
+      <div class="mode-stage">
+        <img class="shot" data-mode="summary" src="assets/mode-summary.webp" width="2560" height="1640" loading="lazy" alt="Quick summary of a lesson on Bayes' rule: two short sections of plain text.">
+        <img class="shot" data-mode="walkthrough" hidden src="assets/mode-walkthrough.webp" width="2560" height="1640" loading="lazy" alt="Detailed walkthrough showing a plot of a curve with one downhill step, followed by its explanation.">
+        <img class="shot" data-mode="dialogue" hidden src="assets/mode-dialogue.webp" width="2560" height="1640" loading="lazy" alt="Tutor dialogue: a curious host asks a question and a tutor answers, turn by turn.">
+        <img class="shot" data-mode="course" hidden src="assets/mode-course.webp" width="2560" height="1640" loading="lazy" alt="Course mode opening with what you will learn, followed by short key points.">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="course">
+  <div class="wrap">
+    <div class="intro">
+      <h2>A course that asks something of you</h2>
+      <p>Course turns each section into a short lesson: a goal, key points on screen while the full explanation is spoken, and three things that make you think instead of nod.</p>
+    </div>
+    <div class="course-grid">
+      <figure class="piece worked">
+        <img src="assets/course-worked.webp" width="1452" height="724" loading="lazy" alt="A worked example titled Three steps at a learning rate of one quarter, with two of its three steps revealed.">
+        <figcaption><strong>Work it by hand</strong>A small problem with easy numbers. Try it first, then reveal the working one step at a time.</figcaption>
+      </figure>
+      <figure class="piece diagram">
+        <img src="assets/course-diagram.webp" width="1452" height="1550" loading="lazy" alt="A teaching diagram of one gradient descent step: current point, slope, step, new point, and an arrow back to the start.">
+        <figcaption><strong>See how the parts connect</strong>When a section describes a process, Narad draws it as boxes and arrows.</figcaption>
+      </figure>
+      <figure class="piece quiz">
+        <img src="assets/course-quiz.webp" width="1452" height="976" loading="lazy" alt="A check question answered correctly, with an explanation of why the other options are wrong.">
+        <figcaption><strong>Check your understanding</strong>Questions test the idea, not the wording. You learn why your answer was right, or which mistake it was.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="listen" class="listen">
+  <div class="wrap">
+    <div class="intro">
+      <h2>Listen while the picture stays put</h2>
+      <p>Narration follows the text and keeps the current figure on screen until the next one. Formulas and numbers are spoken the way a person would say them.</p>
+    </div>
+    <div class="listen-grid">
+      <img class="phone" src="assets/phone-present.webp" width="780" height="1560" loading="lazy" alt="Presentation mode on a phone, showing the diagram above the sentence being spoken.">
+      <img class="phone" src="assets/phone-course.webp" width="780" height="1560" loading="lazy" alt="A check question in the reader on a phone, with the listening controls along the bottom.">
+    <ul class="facts">
+      <li><strong>The voice runs on your Mac</strong>Lesson text is never sent to a speech service, and narration audio is never saved.</li>
+      <li><strong>Separate voices</strong>A narrator for explanations, and a host and a tutor for the dialogue.</li>
+      <li><strong>On your phone too</strong>Reach your Mac privately from an iPhone and control playback from the lock screen.</li>
+    </ul>
+    </div>
+  </div>
+</section>
+
+<section id="ask">
+  <div class="wrap">
+    <div class="tutor-grid">
+      <img class="shot" src="assets/tutor.webp" width="2560" height="1640" loading="lazy" alt="A question typed under one passage of a lesson, with a choice between explaining from the lesson and researching further.">
+      <div>
+        <h2>Ask about the exact sentence</h2>
+        <p class="lede" style="margin-top:18px">Every passage has its own place for questions. The tutor answers about that passage, with the lesson and its sources in front of it.</p>
+        <ul>
+          <li>Type a question or dictate it.</li>
+          <li>Keep the answer inside the lesson, or let the tutor research further and cite what it found.</li>
+          <li>Answers can include equations, the lesson's own figures, and simple diagrams and plots.</li>
+          <li>Your questions stay under the passage, so the lesson grows with you.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start" class="footing">
+  <div class="wrap">
+    <div class="intro">
+      <h2>What you need, and what stays private</h2>
+    </div>
+    <div class="footing-grid">
+      <div>
+        <h3>To run it</h3>
+        <ul>
+          <li>A Mac. The local voice needs Apple Silicon.</li>
+          <li>Node.js 24 or newer.</li>
+          <li>Codex or Claude installed and signed in. Narad uses your own account to write lessons.</li>
+        </ul>
+        <pre><code>git clone https://github.com/Apoorva87/Narad.git
+cd Narad
+./setup.sh --with-speech
+npm run dev</code></pre>
+        <p class="note">The voice model is a one-time download of about 7.6 GB. Leave out <code>--with-speech</code> to read without listening.</p>
+      </div>
+      <div>
+        <h3>On your Mac, not ours</h3>
+        <ul>
+          <li>Your library is a folder of plain files you can open, copy and edit.</li>
+          <li>Narad listens only on your own machine unless you choose to reach it from your phone.</li>
+          <li>Lesson writing goes through the AI account you already have. Nothing goes to a Narad server, because there isn't one.</li>
+          <li>Captured articles keep their credits, and nothing is presented as fact that the source does not say.</li>
+        </ul>
+        <p class="note">The default voice, Breeze TTS 2, is licensed for personal and research use. Qwen3-TTS is included as an alternative under Apache 2.0.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Narad is named for Narada, the travelling sage who carries a veena.</span>
+    <a href="https://github.com/Apoorva87/Narad">Source and full documentation on GitHub</a>
+  </div>
+</footer>
+
+<script>
+// Lesson forms: one screenshot and one sentence per form.
+const notes = {
+  summary: 'A few sentences per source, then how the sources fit together. Enough to decide whether to go deeper.',
+  walkthrough: 'The full explanation, section by section, with every figure, table and number from the source kept and explained.',
+  dialogue: 'A curious host asks what you would ask, and a tutor answers. Good for listening on a walk.',
+  course: 'Each section as a short lesson: a goal, key points, a worked example, a question to answer, and one thing to remember.',
+};
+const tabs = [...document.querySelectorAll('.mode-tabs button')];
+function showMode(mode) {
+  for (const tab of tabs) tab.setAttribute('aria-selected', String(tab.dataset.mode === mode));
+  for (const image of document.querySelectorAll('.mode-stage img')) image.hidden = image.dataset.mode !== mode;
+  document.querySelector('.mode-note').textContent = notes[mode];
+}
+tabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => showMode(tab.dataset.mode));
+  tab.addEventListener('keydown', event => {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    const next = tabs[(index + step + tabs.length) % tabs.length];
+    next.focus(); showMode(next.dataset.mode);
+  });
+});
+
+// The strings: drawn straight, plucked once on arrival, then still.
+const strings = [...document.querySelectorAll('.strings path')];
+const draw = (path, bend) => { const y = Number(path.dataset.y); path.setAttribute('d', `M0 ${y} Q 800 ${y + bend} 1600 ${y}`); };
+strings.forEach(path => draw(path, 0));
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const start = performance.now() + 350;
+  const pluck = now => {
+    let moving = false;
+    strings.forEach((path, index) => {
+      const t = (now - start - index * 130) / 1000;
+      if (t < 0) { moving = true; return; }
+      const size = 15 * Math.exp(-2.6 * t);
+      if (size > 0.15) moving = true;
+      draw(path, size > 0.15 ? size * Math.sin(t * (30 - index * 3)) : 0);
+    });
+    if (moving) requestAnimationFrame(pluck);
+  };
+  requestAnimationFrame(pluck);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Narad — a veena and a spark of understanding</title>
+  <rect width="64" height="64" rx="18" fill="#244FC5"/>
+  <path d="M22 34c-5-1-10 2-10 8 0 7 6 12 13 12 6 0 10-5 9-10l-3-6-5-3-4-1Z" fill="#FFF9ED"/>
+  <path d="m25 37 21-24 5 4-21 25" fill="#FFF9ED"/>
+  <path d="m20 46 28-31M23 48l26-31" stroke="#244FC5" stroke-width="1.25" stroke-linecap="round"/>
+  <path d="m38 20 5 4m-9 1 5 4m-9 1 5 4" stroke="#244FC5" stroke-width="1.6"/>
+  <path d="m43 14 3-4 7 6-3 4" stroke="#FFF9ED" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m19 13 1.8 5.2L26 20l-5.2 1.8L19 27l-1.8-5.2L12 20l5.2-1.8L19 13Z" fill="#EDC478"/>
+  <path d="M43 35c4 1 7 4 7 8m-6-14c7 2 12 7 12 14" stroke="#EDC478" stroke-width="2" stroke-linecap="round"/>
+</svg>
