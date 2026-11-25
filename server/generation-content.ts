@@ -7,7 +7,7 @@ export type TeachingTask = { id: string; source: CapturedSource; section: Source
 export type TeachingOutput = { task: TeachingTask; teaching: AuthoredSection };
 export const agentSectionSchema = authoredSectionSchema.extend({ visuals: z.array(authoredSectionSchema.shape.visuals.element.extend({ dialogueTurns: authoredSectionSchema.shape.visuals.element.shape.dialogueTurns.unwrap() })), units: z.array(authoredSectionSchema.shape.units.element.extend({ question: z.string().nullable(), slide: z.string().trim().min(1) })),
   // Structured output needs every field present: a section without a useful diagram returns null for it.
-  course: courseSchema.extend({ checks: courseSchema.shape.checks.max(2), diagram: courseSchema.shape.diagram.unwrap() }) });
+  course: courseSchema.extend({ checks: courseSchema.shape.checks.max(2), diagram: courseSchema.shape.diagram.unwrap(), worked: courseSchema.shape.worked.unwrap() }) });
 function exactBatch<T extends z.ZodRawShape>(taskIds:string[],shape:T) {
   const ids=taskIds as [string,...string[]];
   return z.object({results:z.array(z.object({taskId:z.enum(ids),...shape})).length(taskIds.length)}).superRefine((batch,ctx)=>{
@@ -105,9 +105,20 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
       if(new Set(check.options.map(option=>option.trim().toLowerCase())).size!==check.options.length)issues.push(`${name} repeats an option.`);
       // Options are read aloud and shown in a different order, so they must be plain text that stands alone.
       if(check.options.some(option=>/\$[^$]+\$|[\\`]|\*\*/.test(option)))issues.push(`${name} options must be plain text without Markdown or LaTeX.`);
+      // A learner should not be able to pick the answer by its shape: flag a correct option that is clearly the longest.
+      const correct=check.options[check.answer],others=check.options.filter((_,at)=>at!==check.answer);
+      if(correct&&others.length){const average=others.reduce((sum,option)=>sum+option.length,0)/others.length;if(average>=12&&correct.length>Math.max(...others.map(option=>option.length))&&correct.length>=average*1.4)issues.push(`${name}: the correct option is noticeably longer than the others, which gives it away. Make all options similar in length and detail.`)}
+      // Options are shuffled when the lesson is compiled, so a letter, number or position would point at the wrong one.
+      if([check.question,check.explanation,check.explanationSpoken].some(text=>/\b(?:[Oo]ptions?|[Cc]hoices?)\s+(?:[A-E]\b|[1-5]\b|(?:one|two|three|four)\b)|\b[Aa]nswers?\s+[A-E]\b|\b(?:[Ff]irst|[Ss]econd|[Tt]hird|[Ff]ourth|[Ll]ast)\s+(?:option|choice)\b/.test(text)))issues.push(`${name} refers to an option by letter, number or position; options are shuffled, so describe what the option says instead.`);
       if(check.options.some(option=>/\b(?:all|none|both|neither) of the (?:above|options)\b|\b(?:both|either) [a-d] (?:and|or) [a-d]\b/i.test(option)))issues.push(`${name} options must each stand alone; do not refer to other options.`);
     });
     if(course.diagram)issues.push(...diagramIssues(course.diagram));
+    if(course.worked){
+      const worked=course.worked;noSpeakerLabel('Worked example problem',worked.problem);noSpeakerLabel('Worked example result',worked.result);
+      worked.steps.forEach((step,index)=>{noSpeakerLabel(`Worked example step ${index+1}`,step.markdown);noSpeakerLabel(`Worked example step ${index+1} spoken text`,step.spokenText)});
+      // A step shows its working; raw LaTeX read aloud is unintelligible.
+      if([worked.problemSpoken,worked.resultSpoken,...worked.steps.map(step=>step.spokenText)].some(spoken=>/\$|\\[a-zA-Z]+/.test(spoken)))issues.push('Worked example spoken text must say the mathematics in words, without LaTeX or dollar signs.');
+    }
   }
   return issues;
 }
@@ -149,7 +160,7 @@ export function compilePreparedBundle(bundle:SourceBundle, outputs:TeachingOutpu
         const issues=checkTeaching(task,output.teaching);if(issues.length) throw new Error(issues.join('\n'));return output.teaching;
       });
       // A long section is written in several pieces: its course keeps the first goal, every check and takeaway, and the first diagram.
-      const courses=pieces.map(p=>p.course);const course=courses.every(c=>c)?{objective:courses[0]!.objective,takeaway:courses.map(c=>c!.takeaway).join('\n\n'),checks:courses.flatMap(c=>c!.checks).slice(0,4),diagram:courses.find(c=>c!.diagram)?.diagram}:undefined;
+      const courses=pieces.map(p=>p.course);const course=courses.every(c=>c)?{objective:courses[0]!.objective,takeaway:courses.map(c=>c!.takeaway).join('\n\n'),checks:courses.flatMap(c=>c!.checks).slice(0,4),diagram:courses.find(c=>c!.diagram)?.diagram,worked:courses.find(c=>c!.worked)?.worked}:undefined;
       return {...pieces[0],units:pieces.flatMap(p=>p.units),visuals:[...new Map(pieces.flatMap(p=>p.visuals).map(v=>[v.id,v])).values()],course};
     });
     const part=compileTeachingLesson({id:'part-'+i,title:source.title,description:'Prepared teaching',topic:'Learning',bundle:{...bundle,sources:[{...source,kind:'article'}]},authored,summary:[{title:'In brief',markdown:'Prepared separately.',spokenText:'Prepared separately.'}],speakers:options.speakers});

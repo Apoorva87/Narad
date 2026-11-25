@@ -163,3 +163,30 @@ it('tells the tutor what a check question offers and exports checks and diagrams
   expect(text).toContain('1. Two\n2. Three\n\n*Answer: 1.* x is two.');
   expect(text).toContain('- First event → Second event (time passes)\n- Second event → Delay');
 });
+
+it('compiles a worked example into steps the reader reveals and narration speaks in full, and rejects LaTeX in its spoken text', () => {
+  const tasks = buildTeachingPlan(bundle);
+  const worked = { title: 'Two delays', problem: 'A teaching example: add delays of $2$ ms and $3$ ms.', problemSpoken: 'A teaching example: add delays of two and three milliseconds', steps: [{ markdown: 'Write the sum: $2 + 3$.', spokenText: 'Write the sum, two plus three.' }, { markdown: 'Compute: $2 + 3 = 5$ ms.', spokenText: 'Two plus three is five milliseconds.' }], result: 'The total is $5$ ms.', resultSpoken: 'The total is five milliseconds.' };
+  const lesson = compilePreparedBundle(bundle, tasks.map(task => ({ task, teaching: taught(task, { ...courseMaterial(), worked }) })), summaries, 'generated');
+  const block = lesson.modes.course!.sections[0].blocks.find(item => item.kind === 'steps')!; if (block.kind !== 'steps') throw new Error('expected a worked example');
+  expect(lesson.modes.course!.sections[0].blocks.map(item => item.kind)).toEqual(['callout', 'text', 'figure', 'text', 'text', 'steps', 'quiz', 'callout']);
+  expect(block).toMatchObject({ title: 'Two delays', markdown: worked.problem, steps: [{ markdown: 'Write the sum: $2 + 3$.' }, { markdown: 'Compute: $2 + 3 = 5$ ms.' }], result: 'The total is $5$ ms.' });
+  expect(block.spokenText).toBe('A teaching example: add delays of two and three milliseconds. Write the sum, two plus three. Two plus three is five milliseconds. The total is five milliseconds.');
+  const spokenLatex = { ...worked, steps: [worked.steps[0], { markdown: worked.steps[1].markdown, spokenText: 'Compute $2 + 3 = 5$.' }] };
+  expect(checkTeaching(tasks[0], taught(tasks[0], { ...courseMaterial(), worked: spokenLatex })).join('\n')).toContain('say the mathematics in words');
+  expect(checkTeaching(tasks[0], taught(tasks[0], { ...courseMaterial(), worked }))).toEqual([]);
+});
+
+it('rejects a check whose correct option gives itself away or whose wording depends on option order', () => {
+  const task = buildTeachingPlan(bundle)[0]; const check = courseMaterial().checks[0];
+  const problems = (change: Record<string, unknown>) => checkTeaching(task, taught(task, { ...courseMaterial(), checks: [{ ...check, ...change }] })).join('\n');
+  const options = ['Sorting is what lets the middle comparison tell us which half cannot contain the target', 'Sorted lists have fewer items to look through', 'The middle element can only be located in a sorted list'];
+  expect(problems({ options })).toContain('noticeably longer');
+  // The same long option is fine as a distractor, and options of similar length pass.
+  expect(problems({ options, answer: 1 })).toBe('');
+  expect(problems({ options: ['The comparison tells us which half to discard', 'Sorted lists have fewer items to look through', 'The middle element can only be found when sorted'] })).toBe('');
+  expect(problems({ explanation: 'Option A is right because a delay is elapsed time.' })).toContain('by letter, number or position');
+  expect(problems({ explanationSpoken: 'The first option is right because a delay is elapsed time.' })).toContain('by letter, number or position');
+  expect(problems({ explanation: 'A delay is elapsed time; the first event and the second event bound it.' })).toBe('');
+  expect(problems({ explanation: 'This answers two questions at once: what is measured and in which unit. Answer: elapsed time.' })).toBe('');
+});

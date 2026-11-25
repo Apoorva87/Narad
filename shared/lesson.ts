@@ -40,6 +40,8 @@ const blockSchema = z.discriminatedUnion('kind', [
   z.object({ ...common, kind: z.literal('dialogue'), speaker: text, role: z.enum(['host', 'expert']) }),
   // `markdown` is the caption shown under the drawing.
   z.object({ ...common, kind: z.literal('diagram'), title: text, ...diagramShape }),
+  // A problem worked by hand. `markdown` states the problem; the reader can reveal one step at a time. `spokenText` speaks the problem, every step and the result.
+  z.object({ ...common, kind: z.literal('steps'), title: text, steps: z.array(z.object({ markdown: text })).min(2).max(8), result: text }),
   // `markdown`/`spokenText` ask the question; narration waits for an answer before it speaks the explanation.
   z.object({ ...common, kind: z.literal('quiz'), options: z.array(text).min(2).max(5), answer: z.number().int().min(0), explanation: text, explanationSpoken: text }),
 ]);

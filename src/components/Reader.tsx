@@ -191,7 +191,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
       <main id="lesson-content" role="tabpanel" aria-labelledby={'tab-' + mode} className="lesson-content">
         {!ready ? <p role="status">Restoring your reading position…</p> : sections.map((section, index) => <section key={mode + section.id} className="lesson-section" aria-labelledby={'section-' + section.id}>
           <header className="section-heading"><span className="section-number">{String(index + 1).padStart(2, '0')}</span><div><h2 id={'section-' + section.id}>{section.title}</h2>{section.description && <p>{section.description}</p>}</div></header>
-          {section.blocks.map(block => <div className="passage-with-replies" key={mode + block.id}><LessonBlock block={block} lesson={lesson} active={block.id === activeId} slides={mode === 'course'} quiz={quiz[block.id]} onAnswer={choice => answerQuiz(block.id, choice)} onRetry={() => retryQuiz(block.id)}
+          {section.blocks.map(block => <div className="passage-with-replies" key={mode + block.id}><LessonBlock block={block} lesson={lesson} active={block.id === activeId} slides={mode === 'course'} narrating={narration.state.status === 'playing' && narration.state.blockId === block.id} quiz={quiz[block.id]} onAnswer={choice => answerQuiz(block.id, choice)} onRetry={() => retryQuiz(block.id)}
             onSelect={() => select(block.id, mode, false)} onSource={(sourceId, locator) => {tutorPlayback.stop();narration.pause();setSource({ sourceId, locator })}} onVideoPlay={() => {tutorPlayback.stop();narration.pause()}} />
             {replyThread(section.id, block.id, tutor.expanded.has(block.id), () => tutor.toggle(block.id))}
           </div>)}

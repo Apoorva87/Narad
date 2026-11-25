@@ -7,11 +7,14 @@ import { CreditLine } from './CreditLine';
 import { VideoEmbed } from './VideoEmbed';
 import { ConceptDiagram } from './ConceptDiagram';
 import { QuizBlock, type QuizState } from './QuizBlock';
+import { StepsBlock } from './StepsBlock';
 
-export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideoPlay, slides, quiz, onAnswer, onRetry }: {
+export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideoPlay, slides, quiz, onAnswer, onRetry, narrating }: {
   block: Block; lesson: Lesson; active: boolean; onSelect: () => void;
   onSource: (sourceId: string, locator?: string) => void; onVideoPlay?: () => void;
   /** Course mode: a passage shows short key points while narration says more, so the narration text is offered for reading. */
+  /** True while narration is speaking this passage. */
+  narrating?: boolean;
   slides?: boolean; quiz?: QuizState; onAnswer?: (choice: number) => void; onRetry?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -32,6 +35,7 @@ export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideo
       {asset.credit && <p className="figure-credit"><CreditLine credit={asset.credit} /></p>}
     </figure>}
     {block.kind === 'diagram' ? <ConceptDiagram title={block.title} caption={block.markdown} nodes={block.nodes} edges={block.edges} />
+      : block.kind === 'steps' ? <StepsBlock block={block} revealAll={narrating} />
       : block.kind === 'quiz' ? <QuizBlock block={block} state={quiz} onAnswer={choice => onAnswer?.(choice)} onRetry={() => onRetry?.()} />
       : <Markdown onVideoPlay={onVideoPlay} assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>}
     {slides && block.kind === 'text' && block.origin === 'teaching' && block.spokenText.trim() !== block.markdown.trim() && <details className="spoken-notes"><summary>What the tutor says</summary><p>{block.spokenText}</p></details>}

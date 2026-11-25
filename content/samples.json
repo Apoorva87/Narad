@@ -999,6 +999,27 @@
                 "origin": "source"
               },
               {
+                "id": "c-rate-worked",
+                "kind": "steps",
+                "title": "Three steps at a learning rate of one quarter",
+                "markdown": "A teaching example: start at $x_0=4$ on $f(x)=x^2$ with $\\eta=0.25$. Where are you after three steps, and what has happened to the loss?",
+                "steps": [
+                  {
+                    "markdown": "Find the factor each step applies: $1-2\\eta = 1-2(0.25) = 0.5$."
+                  },
+                  {
+                    "markdown": "Apply it three times: $x_1 = 0.5\\times4 = 2$, then $x_2 = 0.5\\times2 = 1$, then $x_3 = 0.5\\times1 = 0.5$."
+                  },
+                  {
+                    "markdown": "Compare the loss: $f(4)=16$ at the start and $f(0.5)=0.25$ after three steps."
+                  }
+                ],
+                "result": "After three steps $x_3=0.5$. Each step halves $x$, so the loss falls to a quarter each time: $16 \\to 4 \\to 1 \\to 0.25$.",
+                "spokenText": "Here is a teaching example. Start at x equals four on x squared, with a learning rate of one quarter. Where are you after three steps, and what has happened to the loss? First, find the factor each step applies. One minus two times one quarter is one half. Next, apply it three times. Half of four is two, half of two is one, and half of one is one half. Then compare the loss. It is sixteen at the start and one quarter after three steps. So after three steps x is one half. Each step halves x, so the loss falls to a quarter each time: sixteen, four, one, then one quarter.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
                 "id": "c-rate-check-0",
                 "kind": "quiz",
                 "markdown": "On $f(x)=x^2$, starting from $x=3$ with $\\eta=1$, what happens?",

@@ -4,10 +4,13 @@ import type { SourceBundle } from '../shared/sources';
 
 const prose = z.string().trim().min(1);
 export const checkSchema = z.object({ question: prose, questionSpoken: prose, options: z.array(prose).min(3).max(4), answer: z.number().int().min(0).max(3), explanation: prose, explanationSpoken: prose });
-/** What turns a section into one lesson of the Course mode: a goal, check questions, a takeaway and an optional concept map. */
+/** A small case worked by hand: a problem, one move per step, and the result. */
+export const workedSchema = z.object({ title: prose, problem: prose, problemSpoken: prose, steps: z.array(z.object({ markdown: prose, spokenText: prose })).min(2).max(8), result: prose, resultSpoken: prose });
+/** What turns a section into one lesson of the Course mode: a goal, check questions, a takeaway, and optionally a worked example and a concept map. */
 export const courseSchema = z.object({
   objective: prose, takeaway: prose, checks: z.array(checkSchema).min(1).max(4),
   diagram: z.object({ title: prose, caption: prose, spokenText: prose, ...diagramShape }).nullable().optional(),
+  worked: workedSchema.nullable().optional(),
 });
 export const authoredSectionSchema = z.object({
   id: prose, introduction: prose, hostQuestion: prose,
@@ -128,6 +131,11 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
         const visual = teaching.visuals.find(item => item.id === assetId)!;
         blocks.push({ ...base, id: 'c-' + unit.id + '-' + assetId, kind: 'figure', assetId, markdown: visual.explanation, spokenText: visual.spokenText });
       }
+    }
+    if (course.worked) {
+      const worked = course.worked;
+      blocks.push({ ...base, id: 'c-' + section.id + '-worked', kind: 'steps', title: worked.title, markdown: worked.problem, steps: worked.steps.map(step => ({ markdown: step.markdown })), result: worked.result,
+        spokenText: [worked.problemSpoken, ...worked.steps.map(step => step.spokenText), worked.resultSpoken].map(part => part.trim().replace(/([^.?!])$/, '$1.')).join(' ') });
     }
     if (course.diagram) { const { caption, ...diagram } = course.diagram; blocks.push({ ...base, id: 'c-' + section.id + '-map', kind: 'diagram', markdown: caption, ...diagram }); }
     course.checks.forEach((check, i) => {

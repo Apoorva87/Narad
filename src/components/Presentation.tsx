@@ -7,6 +7,7 @@ import { Markdown } from './Markdown';
 import { CreditLine } from './CreditLine';
 import { VideoEmbed } from './VideoEmbed';
 import { ConceptDiagram } from './ConceptDiagram';
+import { StepsBlock } from './StepsBlock';
 
 /** Podcast-style view: narration plays while the most recent figure stays on screen until the next one. */
 export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit, askAt, onToggleAsk, onAskCurrent, renderThread, renderQuiz }: {
@@ -72,6 +73,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
         {current.block.kind === 'equation' && <Markdown>{'$$\n' + current.block.latex + '\n$$'}</Markdown>}
         {current.block.kind === 'callout' && <span className="presentation-speaker">{current.block.title}</span>}
         {current.block.kind === 'quiz' ? renderQuiz(current.block)
+          : current.block.kind === 'steps' ? <StepsBlock key={current.block.id} block={current.block} revealAll={state.status === 'playing' && state.blockId === current.block.id} />
           : <Markdown onVideoPlay={narration.pause} assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>}
       </div>}
     </div>

@@ -187,3 +187,31 @@ User asked for Breeze TTS 2 as the local default with the ability to switch back
 ## Public website plan
 
 `docs/public-website-plan.md` describes how to publish Narad as a free website: API keys kept in the visitor's browser, voice generated in the browser, per-account storage behind a login. Nothing in it is built.
+
+## Worked examples
+
+User compared Narad with DeepTutor and liked its explanatory style with formulas. Narad borrows the style, not the system.
+
+- The walkthrough and dialogue guidance now ask for one small case worked by hand wherever a section rests on a formula, quantity or procedure (formula, substitution, result with units), a comparison table when alternatives differ along the same quantities, and a prediction prompt before a result.
+- Course gains an optional worked example per section: a `steps` block the reader reveals one step at a time and narration speaks in full. The reviewer is told to recompute every worked example and table.
+- Not taken from DeepTutor: its mastery gates (an objective stays locked until a graded answer clears it), its knowledge base and retrieval, and its separate question generator. Narad's check questions and contextual tutor cover the same ground with far less machinery. In the user's own DeepTutor trial the tutor made arithmetic and factual slips that Narad's independent review step is designed to catch.
+- Not yet confirmed with a real agent run: the prompt changes are untested against Codex or Claude output. The schema and compiler are tested.
+
+## Prompt techniques adopted from DeepTutor
+
+User asked whether DeepTutor's prompts, scripts or techniques do anything better. Its prompt files were read and compared with Narad's.
+
+Adopted:
+
+- **Fair check questions.** Every distractor encodes one specific misconception and matches the correct option in length, detail and phrasing. A deterministic check now rejects a correct option that is clearly the longest. The first real Narad course run had this flaw: its correct options were up to 1.7 times the length of the others.
+- **No references to option order.** Narad shuffles options, so a question or explanation that says "option A" or "the first option" would point at the wrong one. Guidance forbids it and a check rejects it.
+- **Objectives as abilities**, with a contrast example, not topic lists.
+- **Short spoken sentences**: lead with the point, one idea per sentence, rarely over twenty-five words.
+- **Change the approach when an explanation did not land** (contextual tutor): a different example, the missing prerequisite, a picture, or a worked case, not the same explanation in simpler words.
+
+Considered and left:
+
+- Learner intake and profile, mastery gates, spaced review and error-type diagnosis: all need per-learner state that Narad does not keep.
+- Organising a course around the learner's goal instead of the source's sections: conflicts with Narad's section-by-section coverage checks.
+- "Replace the one weak distractor, not the whole question": Narad's revision step rewrites a whole section when one issue is found. A targeted revision would save agent time, but it changes the preparation loop and was not attempted here.
+- Its scripts in the playground only replay one saved model exchange; Narad already keeps every prompt and result per call.

@@ -13,7 +13,7 @@ export function minimalLesson(): any {
 }
 
 /** Course material every authored section now carries; tests about other behaviour add it through `withCourse`. */
-export const courseMaterial = () => ({ objective: 'Explain what the delay measures.', takeaway: 'A delay is elapsed time between two events.', diagram: null,
+export const courseMaterial = () => ({ objective: 'Explain what the delay measures.', takeaway: 'A delay is elapsed time between two events.', diagram: null, worked: null,
   checks: [{ question: 'What does the delay measure?', questionSpoken: 'What does the delay measure?', options: ['Elapsed time', 'Distance', 'Mass'], answer: 0, explanation: 'A delay is elapsed time.', explanationSpoken: 'A delay is elapsed time.' }] });
 /** Wraps a fake agent so its authored sections include slides and course material unless the test supplied its own. */
 export function withCourse<A extends unknown[]>(run: (request: any, ...rest: A) => Promise<unknown>) {

@@ -22,6 +22,16 @@ test('the course mode shows key points, a teaching diagram and check questions t
   await expect(quiz.locator('.quiz-feedback')).toContainText('Correct.');
   await expect(page.locator('.quiz-score')).toContainText('0 of 1 right on the first try · 3 still to answer');
 
+  // A worked example hides its steps until asked, one at a time.
+  const worked = page.locator('#block-c-rate-worked');
+  await expect(worked).toContainText('Work it by hand');
+  await expect(worked.locator('.worked-steps li')).toHaveCount(0);
+  await worked.getByRole('button', { name: 'Show the first step' }).click();
+  await expect(worked.locator('.worked-steps li')).toHaveCount(1);
+  await worked.getByRole('button', { name: 'Show all' }).click();
+  await expect(worked.locator('.worked-steps li')).toHaveCount(3);
+  await expect(worked.locator('.worked-result')).toContainText('After three steps');
+
   // Presentation holds the diagram on screen and offers the same question to answer.
   await page.locator('#block-c-update-check-0 .passage-marker').click();
   await page.keyboard.press('p');

@@ -268,3 +268,24 @@ video.video-frame{object-fit:contain}
 .presentation-transcript .quiz-feedback .prose{font-size:15px}.presentation-transcript .quiz-retry{color:#9fb0c8}
 @media(max-width:760px){.quiz{padding:16px}.concept-diagram{padding:12px}.presentation-diagram svg{max-height:34vh}}
 .row-text small em.active{display:inline-flex;align-items:center;gap:5px;color:#3154bd;font-weight:550}
+
+/* Worked examples: a problem solved by hand, revealed one step at a time. */
+.block-steps{margin:18px 0 23px}
+.worked{border:1px solid #e3dcc8;border-radius:12px;background:#fffdf6;padding:20px 22px}
+.worked-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;color:#8a6a1f;font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.worked-heading svg{align-self:center}.worked-heading span{text-transform:none;letter-spacing:0;font-size:13px;color:#5d4c22;font-weight:550}
+.worked>.prose{font-size:15px;line-height:1.8;color:#2f3a4d}.worked>.prose p:last-child{margin-bottom:0}
+.worked-prompt{margin:12px 0 0;font-size:12px;color:#8a7a52;font-style:italic}
+.worked-steps{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}.worked-steps:empty{display:none}
+.worked-steps li{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;background:#fff;border:1px solid #eee6d2;border-radius:9px;animation:present-in .3s ease}
+.worked-number{flex:0 0 22px;height:22px;margin-top:4px;display:grid;place-items:center;border-radius:50%;background:#f1e7c9;color:#7a5d17;font-size:11px;font-weight:650}
+.worked-steps .prose{font-size:14.5px;line-height:1.75;min-width:0;flex:1}.worked-steps .prose p{margin:0}.worked-steps .katex-display{margin:.35em 0}
+.worked-result{margin-top:12px;padding:12px 14px;border-radius:9px;background:#eef8f3;border-left:3px solid #3f9b78}
+.worked-result strong{display:block;font-size:12px;color:#2c6f57;margin-bottom:2px}.worked-result .prose{font-size:14.5px;line-height:1.75}.worked-result .prose p:last-child{margin-bottom:0}
+.worked-actions{display:flex;align-items:center;gap:16px;margin-top:14px}.worked-actions .text-link{font-size:12px;color:#7b6a45;padding:0}
+.presentation-transcript .worked{background:#1b2436;border-color:#3a3f52}.presentation-transcript .worked-heading{color:#e2c577}.presentation-transcript .worked-heading span{color:#f1e3b8}
+.presentation-transcript .worked>.prose{color:#fff;font-size:18px}.presentation-transcript .worked-prompt{color:#b9ab84}
+.presentation-transcript .worked-steps li{background:#222d44;border-color:#36425f}.presentation-transcript .worked-steps .prose,.presentation-transcript .worked-result .prose{font-size:16px}
+.presentation-transcript .worked-number{background:#4a4226;color:#f1e3b8}.presentation-transcript .worked-result{background:#173a30}.presentation-transcript .worked-result strong{color:#8fd6bb}
+.presentation-transcript .worked-actions .text-link{color:#b9ab84}.presentation-transcript .worked .secondary-button{background:#2c3a59;color:#e8edf6;border-color:#465883}
+@media(max-width:760px){.worked{padding:16px}}
