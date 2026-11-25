@@ -124,6 +124,33 @@ For an app-like window, use Safari’s **Add to Home Screen**. After pressing Li
 
 Reading saved lessons requires no agent credentials or TTS model. Preparing a new lesson requires an installed, signed-in Codex or Claude CLI and uses that account’s remote model service. Speech runs locally after the one-time setup below. Fonts and demonstration figures are bundled; saved lessons do not depend on a CDN.
 
+## Using Narad
+
+A short path from an article to a lesson you can read, hear and test yourself on. Later sections cover each step in detail.
+
+1. **Start Narad** with `npm run dev` (or `./start.sh start` for the container runtime) and open the address it prints.
+2. **Add a lesson.** Choose **Add a lesson**, then paste article links, type a topic, or drop in images. Pick the learner level. Narad saves the sources and shows what it captured.
+3. **Prepare it.** On the saved sources page choose **Codex** or **Claude** and press **Prepare lesson**. The library row shows progress while it runs. You can stop a run and **Continue** it later; finished sections are kept.
+4. **Read or listen.** Open the lesson and pick a mode with the tabs or the keys `1` to `4`: Quick summary, Detailed walkthrough, Tutor dialogue, or Course. Press **Listen** (or Space) for narration.
+5. **Ask.** Choose **Ask tutor** under any passage to ask about exactly that passage.
+
+### Taking a Course
+
+The **Course** tab turns each source section into one lesson.
+
+- It opens with **What you will learn**, then shows short key points while the voice gives the full explanation. Open **What the tutor says** under a passage to read that narration instead.
+- A **teaching diagram** appears when a section describes a process or structure.
+- At a **Check your understanding** question, pick an answer. You see whether it was right and why, and **Try again** lets you retry.
+- While listening, the voice reads the question and waits. Pick an answer and it continues with the explanation. Pressing Play without answering reveals the answer and explains it.
+- The end of the course shows how many questions you got right on the first try. Answers are not saved, so each visit is a fresh attempt.
+- Press **Present** (or `P`) for the full-screen version: the figure or diagram stays on screen beside the current key points and questions.
+
+A lesson prepared before Course existed has no Course tab. To add one, open its saved sources and prepare a new version. The bundled sample "What a gradient actually tells you" includes a Course on new installations.
+
+### Choosing the voice
+
+Open **Settings → Voice**. **Voice model** switches between Breeze TTS 2 (the default, more expressive, slower) and Qwen3-TTS (faster, smaller). The narrator, host and tutor voices and the speed are set on the same page. [Local speech](#local-speech) explains how to install each model and what to expect from it.
+
 ## Local speech
 
 On an Apple Silicon Mac with GPU access, install [uv](https://docs.astral.sh/uv/) and run once:
