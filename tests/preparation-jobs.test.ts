@@ -5,14 +5,17 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LessonStore } from '../server/store';
 import { PreparationService } from '../server/preparation';
+import { withCourse } from './fixture';
+/** A preparation service whose fake agent also returns course material. */
+class CourseService extends PreparationService{constructor(...args:ConstructorParameters<typeof PreparationService>){const [store,dir,runner,download]=args;super(store,dir,runner&&{...runner,run:withCourse(runner.run)},download)}}
 import type { AgentRequest, AgentUsage } from '../server/agent-runner';
 import sharp from 'sharp';
 const dirs:string[]=[];const stores:LessonStore[]=[];const services:PreparationService[]=[];
 afterEach(async()=>{for(const s of services.splice(0)) await s.shutdown();for(const s of stores.splice(0))s.close();for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true})});
-async function setup(run:(r:AgentRequest,s:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(u:AgentUsage)=>void)=>Promise<unknown>,markdown='# Time\n\nA delay of 42 ms.'){const dir=await mkdtemp(join(tmpdir(),'narad-job-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown,assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);return {dir,store,service}}
+async function setup(run:(r:AgentRequest,s:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(u:AgentUsage)=>void)=>Promise<unknown>,markdown='# Time\n\nA delay of 42 ms.'){const dir=await mkdtemp(join(tmpdir(),'narad-job-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown,assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);const service=new CourseService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);return {dir,store,service}}
 const answer=async(r:AgentRequest)=>{if(r.kind==='review')return{approved:true,issues:[]};if(r.kind==='summary')return{sections:[{title:'In brief',markdown:'A delay is measured in milliseconds.',spokenText:'A delay is measured in milliseconds.',sourceIds:['a']},{title:'Takeaway',markdown:'Measure the delay between events.',spokenText:'Measure the delay between events.',sourceIds:['a']}]} ;return{id:'s00',introduction:'Learn delay.',hostQuestion:'What is delay?',units:[{id:'s00-u00',walkthrough:'The 42 ms delay is elapsed time between two events.',walkthroughSpoken:'Forty two milliseconds is elapsed time between events.',dialogue:'Imagine timing two events with a stopwatch: the delay is 42 ms.',dialogueSpoken:'Imagine timing two events with a stopwatch.',question:null}],visuals:[]}};
 async function finished(service:PreparationService){await expect.poll(()=>['running','stopping'].includes(service.state().jobs[0]?.status??'running'),{timeout:3000}).toBe(false);return service.state().jobs[0]}
-it('prepares, reviews and saves three distinct modes with a persisted job',async()=>{const {service,store}=await setup(answer);service.start('source','codex');const job=await finished(service);expect(job.status).toBe('completed');const lesson=store.get(job.lessonId!)!;expect(Object.keys(lesson.modes)).toEqual(['summary','walkthrough','dialogue']);expect(store.getBundle('source')!.lessonId).toBe(lesson.id);expect(service.state().jobs[0].status).toBe('completed')});
+it('prepares, reviews and saves four distinct modes with a persisted job',async()=>{const {service,store}=await setup(answer);service.start('source','codex');const job=await finished(service);expect(job.status).toBe('completed');const lesson=store.get(job.lessonId!)!;expect(Object.keys(lesson.modes)).toEqual(['summary','walkthrough','dialogue','course']);expect(lesson.modes.course!.sections[0].blocks.map(b=>b.kind)).toEqual(['callout','text','quiz','callout']);expect(store.getBundle('source')!.lessonId).toBe(lesson.id);expect(service.state().jobs[0].status).toBe('completed')});
 it('never duplicates a running item and never publishes after cancellation even if a provider returns late',async()=>{let release!:(v:unknown)=>void;const {service,store}=await setup(()=>new Promise(r=>release=r));const job=service.start('source','codex');const again=service.start('source','claude');expect(again).toMatchObject({id:job.id,status:'running',provider:'codex'});expect(service.state().jobs).toHaveLength(1);await expect.poll(()=>!!release).toBe(true);service.stop(job.id);release(await answer({kind:'author'} as AgentRequest));await expect.poll(()=>service.state().jobs[0].status).toBe('stopped');expect(store.list()).toEqual([])});
 it('does not publish rejected content and lets the learner stop revision',async()=>{
  let authors=0;const runner=async(r:AgentRequest,signal:AbortSignal)=>{if(r.kind==='review')return{approved:false,issues:['Unsupported interpretation of the units.']};if(r.kind==='author'&&++authors>1)await new Promise((_,reject)=>{if(signal.aborted)reject(signal.reason);else signal.addEventListener('abort',()=>reject(signal.reason),{once:true})});return answer(r)};
@@ -39,7 +42,7 @@ it('captures researched articles with images into the folder and teaches from th
   if(r.kind==='author'){images.push(r.images);const base=await answer(r) as any;const ids=[...new Set([...r.prompt.matchAll(/"id":"(s\d+-u\d+)","markdown":"(?:[^"\\]|\\.)*","kind":"(?:text|table)"/g)].map(m=>m[1]))];return{...base,units:ids.map(id=>({...base.units[0],id})),visuals:[{id:'source-asset-0',caption:'Delay chart',explanation:'The chart shows a 42 ms delay.',spokenText:'The chart shows a forty two millisecond delay.',dialogueTurns:[{role:'host',markdown:'What does it show?',spokenText:'What does it show?'},{role:'expert',markdown:'A 42 ms delay.',spokenText:'A forty two millisecond delay.'}]}]}}
   return answer(r);
  };
- const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true}]},download);services.push(service);
+ const service=new CourseService(store,dir,{run,available:()=>[{id:'codex',available:true}]},download);services.push(service);
  service.start('notes','codex');const job=await finished(service);
  expect(job.error).toBeUndefined();expect(job.status).toBe('completed');
  expect(images.flat().length).toBeGreaterThan(0);
@@ -78,7 +81,7 @@ async function setupThree(run:Run,atOnce=1,markdown=three){
  store.saveBundle({id:'source',title:'Time',text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title:'Time',kind:'article',markdown,assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);
  const settings=store.getSettings();settings.preparation.sectionsAtOnce=atOnce;store.saveSettings(settings);
  const runner={current:run};
- const service=new PreparationService(store,dir,{run:(r,s)=>runner.current(r,s),available:()=>[{id:'codex',available:true}]});services.push(service);
+ const service=new CourseService(store,dir,{run:(r,s)=>runner.current(r,s),available:()=>[{id:'codex',available:true}]});services.push(service);
  const folder=join(store.libraryRoot,'time','preparation');
  const progress=async()=>JSON.parse(await readFile(join(folder,'progress.json'),'utf8'));
  return {dir,store,service,runner,folder,progress};
@@ -134,7 +137,7 @@ it('redoes only the sections whose source changed when continuing',async()=>{
 it('marks a running progress file interrupted on startup and launches nothing',async()=>{
  const t=await setupThree(failThird);t.service.start('source','codex');await finished(t.service);
  const p=await t.progress();await writeFile(join(t.folder,'progress.json'),JSON.stringify({...p,status:'running'}));
- const calls:AgentRequest[]=[];const restarted=new PreparationService(t.store,t.dir,{run:async r=>{calls.push(r);return teach(r)},available:()=>[{id:'codex',available:true}]});services.push(restarted);
+ const calls:AgentRequest[]=[];const restarted=new CourseService(t.store,t.dir,{run:async r=>{calls.push(r);return teach(r)},available:()=>[{id:'codex',available:true}]});services.push(restarted);
  expect(restarted.state().jobs[0].status).toBe('interrupted');expect(restarted.state().sessions).toEqual([]);
  await expect.poll(async()=>(await t.progress()).status).toBe('interrupted');
  await new Promise(r=>setTimeout(r,50));expect(calls).toEqual([]);
@@ -204,7 +207,7 @@ it('never overwrites the archived previous lesson when publishing is retried aft
  t.store.insert=((lesson:unknown,options:{replace?:boolean})=>{const saved=insert(lesson,options);if(!crashed){crashed=true;throw new Error('Process died after writing the lesson.')}return saved}) as typeof t.store.insert;
  t.service.start('source','codex');expect((await finished(t.service)).status).toBe('failed');
  const p=await t.progress();await writeFile(join(t.folder,'progress.json'),JSON.stringify({...p,status:'running'}));
- const restarted=new PreparationService(t.store,t.dir,{run:teach,available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
+ const restarted=new CourseService(t.store,t.dir,{run:teach,available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
  restarted.start('source','codex');const again=await finished(restarted);expect(again.error).toBeUndefined();expect(again.status).toBe('completed');
  const published=(await readdir(join(t.folder,'runs'))).filter(r=>!r.endsWith('-abandoned'));
  expect(published).toHaveLength(1);expect(await readFile(join(t.folder,'runs',published[0],'lesson.json'),'utf8')).toBe(original);
@@ -251,14 +254,14 @@ it('wraps source and learner data in untrusted JSON values inside every preparat
 it('reuses compatible approved sections after the preparation service restarts',async()=>{
  let run=1;const authored:string[]=[];const runner=async(r:AgentRequest,s:AbortSignal)=>{if(r.kind==='author'){const section=r.name.match(/-(s\d+)-/)?.[1]??'s00';authored.push(run+':'+section);if(run===1&&section==='s01')throw new Error('provider stopped')}return sectionAnswer(r)};
  const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');const settings=store.getSettings();settings.preparation.sectionsAtOnce=1;store.saveSettings(settings);service.start('source','codex');expect((await finished(service)).status).toBe('failed');
- const restarted=new PreparationService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
+ const restarted=new CourseService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
  expect(authored.filter(call=>call.startsWith('2:'))).toEqual(['2:s01']);
 });
 it('regenerates a previously approved section when its source changes',async()=>{
  let run=1;const authored:string[]=[];const runner=async(r:AgentRequest,s:AbortSignal)=>{if(r.kind==='author'){const section=r.name.match(/-(s\d+)-/)?.[1]??'s00';authored.push(run+':'+section);if(run===1&&section==='s01')throw new Error('provider stopped')}return sectionAnswer(r)};
  const {service,store,dir}=await setup(runner,'# First\n\nA delay of 42 ms.\n\n# Second\n\nA delay of 7 ms.');const settings=store.getSettings();settings.preparation.sectionsAtOnce=1;store.saveSettings(settings);service.start('source','codex');expect((await finished(service)).status).toBe('failed');
  const bundle=store.getBundle('source')!;bundle.sources[0].markdown='# First\n\nA delay of 43 ms.\n\n# Second\n\nA delay of 7 ms.';store.saveBundle(bundle,[]);
- const restarted=new PreparationService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
+ const restarted=new CourseService(store,dir,{run:runner,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(restarted);run=2;restarted.start('source','codex');expect((await finished(restarted)).status).toBe('completed');
  expect(authored.filter(call=>call.startsWith('2:')).sort()).toEqual(['2:s00','2:s01']);
 });
 
@@ -281,7 +284,7 @@ async function setupMany(titles:string[],atOnce:number,run:Gate['run']){
  const dir=await mkdtemp(join(tmpdir(),'narad-queue-'));dirs.push(dir);const store=new LessonStore(join(dir,'db'));stores.push(store);
  for(const title of titles)store.saveBundle({id:title.toLowerCase(),title,text:'Explain',createdAt:new Date().toISOString(),status:'captured',sources:[{id:'a',title,kind:'article',markdown:'# Time\n\nA delay of 42 ms.',assets:[],warnings:[],inventory:{images:0,inlineSvg:0,tables:0,savedVisuals:0}}]},[]);
  const settings=store.getSettings();(settings.preparation as Record<string,unknown>).lessonsAtOnce=atOnce;store.saveSettings(settings);
- const service=new PreparationService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);
+ const service=new CourseService(store,dir,{run,available:()=>[{id:'codex',available:true},{id:'claude',available:true}]});services.push(service);
  const progress=(slug:string)=>JSON.parse(readFileSync(join(store.libraryRoot,slug,'preparation','progress.json'),'utf8'));
  const job=(slug:string)=>service.state().jobs.find(j=>j.slug===slug);
  return {dir,store,service,progress,job};
@@ -325,7 +328,7 @@ it('turns a queued item persisted before a restart into interrupted without call
  const g=gate();const t=await setupMany(['Time','Space'],1,g.run);
  t.service.start('time','codex');t.service.start('space','claude');
  await expect.poll(()=>existsSync(join(t.store.libraryRoot,'space','preparation','progress.json'))).toBe(true);
- const calls:AgentRequest[]=[];const restarted=new PreparationService(t.store,t.dir,{run:async r=>{calls.push(r);return answer(r)},available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
+ const calls:AgentRequest[]=[];const restarted=new CourseService(t.store,t.dir,{run:async r=>{calls.push(r);return answer(r)},available:()=>[{id:'codex',available:true}]});services.push(restarted);await restarted.ready;
  const job=restarted.state().jobs.find(j=>j.slug==='space')!;
  expect(job.status).toBe('interrupted');expect(job.stage).toBe('Not started — the server restarted while it was queued');
  expect(t.progress('space').status).toBe('interrupted');await new Promise(r=>setTimeout(r,50));expect(calls).toEqual([]);

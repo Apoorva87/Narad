@@ -14,17 +14,18 @@ Implemented:
 - Settings page (gear at the top right of the library, or `#settings`): edit every preparation prompt (shared principles, level descriptions, brief summary, walkthrough, dialogue, figures, research, section writing, revision, review), agent and model, review rounds, chunk sizes, time limits, research/capture limits, default level, dialogue speaker names, default voices, speed, and voice speaking styles. Prompts are templates with `{{slots}}`; required slots are enforced. Only changed values are stored, each field resets to its default, and each preparation saves the settings it used as `settings.json` beside its drafts. Changes apply to future preparations only.
 - Choose a learner level (foundational, some background, advanced) when adding sources or before preparing; the agents write for that level.
 - Distinct quick-summary, detailed-walkthrough, and tutor-dialogue reading modes.
+- **Course mode**: each source section becomes one lesson with a stated goal, short key-point slides narrated with the full reviewed explanation, the source figures, an optional teaching diagram (a concept map Narad draws from boxes and arrows), one or two check questions, and a takeaway. Narration asks a check question, waits for your answer, then explains it; pressing Play instead reveals the answer. Option order is shuffled when the lesson is compiled, and your answers are kept only while the lesson is open, so every visit is a fresh attempt. Course material is written and reviewed in the same agent call as the walkthrough, so it adds no extra calls. A lesson gains the Course tab the next time it is prepared; a run continued from sections saved before this feature has no Course until it is started over.
 - Markdown, mathematics, tables, saved diagrams, captions, and source snapshots.
 - Explicitly marked teaching additions.
 - Passage/section navigation and saved reading positions per analysis and mode.
 - Validated lesson JSON import/export; exports embed saved source images so they import on another Mac. Malformed lessons and duplicate IDs are rejected.
 - Responsive desktop/mobile reader, keyboard-accessible controls and dialogs.
-- Prepare all three modes using installed Codex or Claude, with per-section review and bounded correction.
+- Prepare all four modes using installed Codex or Claude, with per-section review and bounded correction.
 - App-owned live session count, progress, stop/retry, retained drafts and job history.
 - Topic research, captured article collections, and source-image explanations through the same preparation flow.
-- On-demand local Qwen3-TTS narration, separate narrator/host/tutor voices, meaning-aware pacing around the selected speed, pause/resume/stop, and automatic passage highlighting and scrolling. Article audio is never saved to disk.
+- On-demand local narration with Breeze TTS 2 (default) or Qwen3-TTS, switchable in Settings, separate narrator/host/tutor voices, meaning-aware pacing around the selected speed, pause/resume/stop, and automatic passage highlighting and scrolling. Article audio is never saved to disk.
 - Presentation mode: full-screen narration that holds the latest figure on screen until the next one, with an optional transcript. Swipe and tap gestures on touch screens; lock-screen and headphone controls via Media Session. The lock screen shows the current slide as artwork (converted to PNG, which iOS requires) and the sentence being spoken as the title.
-- Keyboard shortcuts in the reader (press `?`): Space/K play-pause, ←/→ or J/L passages, Shift+←/→ sections, 1–3 modes, −/+ speed, P present, T transcript, A ask the tutor while presenting.
+- Keyboard shortcuts in the reader (press `?`): Space/K play-pause, ←/→ or J/L passages, Shift+←/→ sections, 1–4 modes, −/+ speed, P present, T transcript, A ask the tutor while presenting.
 - Passage-specific tutor threads: type a question or dictate an editable transcript, answer from the saved lesson or ask Codex/Claude to research further, and retain the discussion under `Replies` beneath that exact passage.
 - Structured tutor answers with Markdown, equations, citations, saved source figures, and constrained teaching diagrams/plots. Expanded replies participate in narration; collapsed replies are skipped. An interrupted live answer stops afterward until you choose `Continue lesson`.
 
@@ -40,7 +41,7 @@ For a new checkout, the setup script installs locked JavaScript dependencies and
 
     ./setup.sh
 
-Add `--with-speech` to also create the Python environment and download the local voice model (about 2.9 GB):
+Add `--with-speech` to also create the Python environment and download the default local voice model, Breeze TTS 2 (about 7.6 GB):
 
     ./setup.sh --with-speech
 
@@ -101,7 +102,7 @@ For container debugging, follow service output or open a read-only-root shell:
 
 Preparation prompts, structured results, and provider event logs are also visible directly on the Mac under `data/library/<item>/preparation/calls/`; the source images sent to the agent are copied into `calls/images/` so they stay inside the agent's job directory. Narad does not impose a dialogue-turn or review-round ceiling: it revises each section until deterministic validation and semantic review approve it, while the live status reports the draft number and current issue so you can stop the preparation at any time. After an interrupted, stopped, or failed run, **Continue** reuses the item's saved sections from `preparation/sections/`, even after the containers restart. It never resumes provider calls automatically after startup, and it regenerates a saved section when its source content or visual identity changed; changing the learner level sets the old run aside.
 
-Docker Desktop does not expose the Mac Metal GPU to Linux containers, so Qwen3-TTS stays on macOS. The API reaches it through `host.docker.internal` with a generated token and continues returning WAV chunks ephemerally. Do not publish port 4321 through a router or tunnel.
+Docker Desktop does not expose the Mac Metal GPU to Linux containers, so the voice model stays on macOS. The API reaches it through `host.docker.internal` with a generated token and continues returning WAV chunks ephemerally. Do not publish port 4321 through a router or tunnel.
 
 ### Private access from an iPhone with Tailscale
 
@@ -129,7 +130,18 @@ On an Apple Silicon Mac with GPU access, install [uv](https://docs.astral.sh/uv/
 
     npm run speech:setup
 
-This creates `speech/.venv`, installs the locked Python 3.12 / MLX Audio 0.6.0 environment, and downloads the pinned Qwen3-TTS 1.7B CustomVoice 8-bit model into `data/models/qwen3-tts` (about 2.9 GB). Inference uses local files with Hugging Face offline mode; lesson text is not sent to a speech service. Setup needs internet access. Run the normal `npm run dev` or `npm start` in a Mac session with Metal GPU access; a restricted coding sandbox can prevent Metal from starting.
+This creates `speech/.venv`, installs the locked Python 3.12 / MLX Audio 0.6.0 environment, and downloads the default voice model, Breeze TTS 2 (full precision, about 7.6 GB), into `data/models/breeze-tts-2`. Inference uses local files with Hugging Face offline mode; lesson text is not sent to a speech service. Setup needs internet access. Run the normal `npm run dev` or `npm start` in a Mac session with Metal GPU access; a restricted coding sandbox can prevent Metal from starting.
+
+Two voice models are supported, chosen in **Settings → Voice → Voice model**:
+
+| Model | Install | Size | Speed on an M4 Max | Licence |
+| --- | --- | --- | --- | --- |
+| Breeze TTS 2 (default) | `npm run speech:setup` | 7.6 GB | about 1.75× real time | BreezeBlue Research and Non-Commercial: personal and research use only, including the audio it makes |
+| Qwen3-TTS 1.7B CustomVoice, 8-bit | `npm run speech:setup -- qwen` | 2.9 GB | about 4.5× real time | Apache 2.0 |
+
+`npm run speech:setup -- all` installs both. If the chosen model is not installed, Narad speaks with the other one and says so in the voice status tooltip, so an installation that only has Qwen3-TTS keeps working. One model is loaded at a time; changing the setting loads the other on the next Listen.
+
+Breeze TTS 2 has no built-in speakers. Narad designs each of its four voices once from a fixed description and saves a short clip of one fixed sentence under `data/models/breeze-tts-2/narad-voices/`; every passage then continues that clip, so Ryan stays the same person through a lesson. These clips contain no lesson content. The same voice names are used with both models, but a name does not sound like the same person across models. Because Breeze is slower, the first passage takes a few seconds longer to start, and listening above about 1.5× speed can outrun generation and leave short gaps; switch to Qwen3-TTS if that matters more than expressiveness.
 
 Open a lesson and select **Listen**. The local model loads on the first request and remains warm until the API stops. A small Python child belongs to the API and exits when its input pipe closes; it is not an agent session. Pause resumes the current audio position. Stop, navigation to another passage, or a voice change restarts from that passage when played again. Mode changes and leaving the reader stop audio. The bookmark beside a passage selects where to listen; section controls work on mobile too.
 
@@ -139,7 +151,7 @@ Narration uses saved `spokenText`, including natural readings of formulas and va
 
 The host TTS worker stays warm and receives text chunks as you listen. Audio is returned directly with `Cache-Control: no-store`; there is no article audio directory or saved-audio endpoint. The browser holds only its current short chunk and up to three look-ahead chunks in temporary memory. Finished, skipped and cancelled audio is released. Pause retains the current chunk to resume at the same point; speed changes use that same in-memory audio. Revisiting a passage generates it again. Saved lessons retain their text and visual assets. The model weights remain installed under project `data/models` even when the library data directory is overridden.
 
-Measured on this Mac with the same 222-character sample: Ryan generated 19.2 seconds of audio in 18.7 seconds including first model load; Aiden generated 13.84 seconds in 3.0 seconds with the model warm. These are two observations, not a latency guarantee. The user approved the voices. Run `node --import tsx scripts/speech-check.ts` to measure generation again without saving audio files. Source: [MLX Audio Qwen3-TTS API and preset voices](https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/qwen3_tts/README.md).
+Measured on this Mac (M4 Max) with a 222-character sample and the model warm: Breeze TTS 2 generated 13.8 seconds of audio in 7.8 seconds; Qwen3-TTS generated 13.84 seconds in 3.0 seconds. A speech recogniser transcribed the Breeze output word for word. These are single observations, not a latency guarantee. Run `node --import tsx scripts/speech-check.ts` (add `qwen` for the other model) to measure generation again without saving audio files. Source: [MLX Audio](https://github.com/Blaizzy/mlx-audio).
 
 ## Data and project structure
 
@@ -152,7 +164,7 @@ Measured on this Mac with the same 222-character sample: Ryan generated 19.2 sec
 | `server/speech.ts` | Saved-passage validation and on-demand synthesis queue |
 | `server/speech-worker.ts`, `speech/worker.py` | Resident local MLX model, JSON-lines protocol, and cancellation |
 | `src/lib/narration.ts` | Playback ownership, pause/resume, prefetch, and stale-response protection |
-| `content/samples.json` | Original sample source snapshots and all three mode scripts |
+| `content/samples.json` | Original sample source snapshots and their mode scripts; the gradient sample includes a Course |
 | `public/assets/` | Saved demonstration diagrams |
 | `shared/sources.ts` | Source intake and visual inventory contract |
 | `server/preparation.ts` | One owned preparation job, research, section authoring/review, and publication |
@@ -160,7 +172,7 @@ Measured on this Mac with the same 222-character sample: Ryan generated 19.2 sec
 | `server/tutor.ts`, `server/tutor-store.ts` | Contextual agent execution, progress, cancellation, and persistent threads |
 | `server/cli-host.mjs` | Child helper tied to server IPC lifetime; cleans up its own process group |
 | `server/generation-content.ts` | Multi-source segmentation, coverage checks, and lesson assembly |
-| `server/lesson-preparation.ts` | Coverage-checked compilation of authored teaching into three reading modes |
+| `server/lesson-preparation.ts` | Coverage-checked compilation of authored teaching into the walkthrough, dialogue and course modes |
 | `scripts/publish-prepared-lesson.ts` | Validate a local authoring manifest, write coverage/artifact files, and optionally save through the API |
 | `server/capture.ts` | Ordered article extraction and safe SVG previews |
 | `server/download.ts` | Bounded public-network downloads with pinned DNS and redirect checks |
@@ -211,7 +223,7 @@ On the first start after upgrading, Narad copies `narad.sqlite` to `data/backups
 
 Export a sample from the reader for a complete example. Each document has `version: 1`, a unique analysis `id`, metadata, original `sources`, `assets`, and one or more prepared `modes`.
 
-Each mode contains ordered sections. Sections contain blocks with stable IDs, display content, `spokenText`, an `origin` (`source` or `teaching`), and source references. Block kinds: `text`, `equation`, `figure`, `callout`, and `dialogue`.
+Each mode contains ordered sections. Sections contain blocks with stable IDs, display content, `spokenText`, an `origin` (`source` or `teaching`), and source references. Block kinds: `text`, `equation`, `figure`, `callout`, `dialogue`, `diagram` (boxes and labelled arrows that Narad draws), and `quiz` (a question, two to five options, the index of the correct one, and an explanation with its own spoken text).
 
 Use a distinct analysis ID to import an edited copy. Imports never overwrite existing lessons.
 
@@ -257,11 +269,13 @@ The KaTeX dependency override aligns transitive copies with the patched direct d
 
 ## Product decisions and next steps
 
+A plan for publishing Narad as a free public website (visitors bring their own model key; voice runs in the browser) is in [docs/public-website-plan.md](docs/public-website-plan.md). None of it is built.
+
 See [the PRD](docs/superpowers/specs/2026-10-19-narad-design.md), [Part 1 plan](docs/superpowers/plans/2026-10-19-narad-part-1.md), and [progress](docs/progress.md).
 
 1. **Library and reader** — completed.
 2. **Research and generation** — source capture, automatic preparation with Codex/Claude, per-section review, and minimal session controls are available. PDF ingestion and supplementary generated diagrams remain unfinished.
-3. **Local narration** — implemented with Qwen3-TTS 1.7B CustomVoice through MLX Audio; voices approved, on-demand playback without saved article audio.
+3. **Local narration** — implemented with Breeze TTS 2 and Qwen3-TTS 1.7B CustomVoice through MLX Audio; voices approved, on-demand playback without saved article audio.
 4. **Interactive tutor** — contextual typed/dictated questions, researched answers, illustrated detours, persistent threads, and spoken replies are implemented. Familiarity adaptations remain next.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries, persistence, trust rules, and playback ownership.

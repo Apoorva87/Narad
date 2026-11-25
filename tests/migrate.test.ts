@@ -9,6 +9,9 @@ import { LessonStore } from '../server/store';
 import { LibraryFs } from '../server/library';
 import { TutorStore } from '../server/tutor-store';
 import { PreparationService } from '../server/preparation';
+import { withCourse } from './fixture';
+/** A preparation service whose fake agent also returns course material. */
+class CourseService extends PreparationService{constructor(...args:ConstructorParameters<typeof PreparationService>){const [store,dir,runner,download]=args;super(store,dir,runner&&{...runner,run:withCourse(runner.run)},download)}}
 import { migrateToLibrary } from '../server/migrate';
 import type { AgentRequest } from '../server/agent-runner';
 import { minimalLesson } from './fixture';
@@ -149,7 +152,7 @@ it('salvages only approved sections whose source still matches and Continue resu
     authored.push(r.prompt.match(/"id":"(s\d\d)"/)![1]);
     return { ...teaching('s01', '2'), units: teaching('s01', '2').units.map(u => ({ ...u, question: null })) };
   };
-  const service = new PreparationService(store, dir, { run, available: () => [{ id: 'claude', available: true }] });
+  const service = new CourseService(store, dir, { run, available: () => [{ id: 'claude', available: true }] });
   await service.ready;
   expect(service.state().jobs.find(job => job.slug === slug)).toMatchObject({ status: 'interrupted', completed: 2, total: 3 });
   service.start(slug, 'claude');

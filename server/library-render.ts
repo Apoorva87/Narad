@@ -10,6 +10,11 @@ function block(lesson: Lesson, item: LessonBlock): string {
     }
     case 'callout': return `> **${item.title}**\n>\n> ${item.markdown.replace(/\n/g, '\n> ')}`;
     case 'dialogue': return `**${item.speaker}:** ${item.markdown}`;
+    case 'quiz': return `**Check your understanding.** ${item.markdown}\n\n${item.options.map((option, index) => `${index + 1}. ${option}`).join('\n')}\n\n*Answer: ${item.answer + 1}.* ${item.explanation}`;
+    case 'diagram': {
+      const label = (id: string) => item.nodes.find(node => node.id === id)?.label ?? id;
+      return `**${item.title}**\n\n${item.edges.map(edge => `- ${label(edge.from)} → ${label(edge.to)}${edge.label ? ` (${edge.label})` : ''}`).join('\n')}\n\n*${item.markdown}*`;
+    }
     default: return item.markdown;
   }
 }

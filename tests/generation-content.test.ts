@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, normalizeTeaching, reconcileReviewIssues, type TeachingTask } from '../server/generation-content';
+import { buildTeachingPlan, compilePreparedBundle, checkTeaching, excerpt, normalizeTeaching, numericTokens, reconcileReviewIssues, type TeachingTask } from '../server/generation-content';
 import { authoredSectionSchema } from '../server/lesson-preparation';
 import type { SourceBundle } from '../shared/sources';
 const article = (id:string) => ({id,title:id,kind:'article' as const,markdown:'# Measure\n\nLatency is 42 ms.\n\n![Plot](source-asset-0)\n\n| A | B |\n| --- | --- |\n| x | 12 |',assets:[{id:'source-asset-0',kind:'image' as const,alt:'Plot',caption:'Plot',src:'/api/source-assets/'+'a'.repeat(64)}],warnings:[],inventory:{images:1,inlineSvg:0,tables:1,savedVisuals:1}});
@@ -115,4 +115,9 @@ it('carries credit and a streamed video through the library folder into the less
   const lesson=compilePreparedBundle(reloaded,tasks.map(t=>({task:t,teaching:draft(t)})),[{title:'S',markdown:'A talk.',spokenText:'A talk.',sourceIds:[reloaded.sources[0].id]},{title:'All',markdown:'A talk.',spokenText:'A talk.',sourceIds:[reloaded.sources[0].id]}],'lesson');
   expect(lesson.assets[0]).toMatchObject({kind:'video',video:{provider:'youtube'},credit:{creditLine:'Lecture. Credit: Ann',pageUrl:'https://example.com/p'}});
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});
+it('recognises a large number however its thousands are separated, so correct LaTeX is not sent back for revision',()=>{
+ const source=[...numericTokens('since 2 to the power 20 is 1,048,576 and 3.5 ms')];
+ for(const written of ['$$2^{20} = 1{,}048{,}576$$ and 3.5','$2^{20}=1\\,048\\,576$, 3.5','2 and 20 give 1048576 in 3.5'])expect(source.filter(n=>!numericTokens(written).has(n))).toEqual([]);
+ expect([...numericTokens('f(1{,}2) and 12,5')]).toEqual(['1','2','12','5']);
 });

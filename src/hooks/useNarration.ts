@@ -18,7 +18,7 @@ export function useNarration(lesson:Lesson,mode:Mode,activeId:string,onActive:(b
   const selectedId=useRef(activeId);selectedId.current=activeId;
   useEffect(()=>{
     const audio=new Audio();audio.preload='auto';
-    const player=new NarrationController(audio,({pace:_,tutor,...request},signal)=>tutor?api.renderTutorSpeech({turnId:tutor.turnId,part:tutor.part,chunk:request.chunk,voice:request.voice},signal):api.renderSpeech(request,signal),next=>{
+    const player=new NarrationController(audio,({pace:_,gate:__,tutor,...request},signal)=>tutor?api.renderTutorSpeech({turnId:tutor.turnId,part:tutor.part,chunk:request.chunk,voice:request.voice},signal):api.renderSpeech(request,signal),next=>{
       setState(next);
       if((next.status==='playing'||next.status==='loading')&&next.blockId&&next.blockId!==selectedId.current)activeCallback.current(next.blockId);
     },progress=>progressCallback.current(progress));
@@ -52,5 +52,5 @@ export function useNarration(lesson:Lesson,mode:Mode,activeId:string,onActive:(b
       else controller.current?.stop();
     } else controller.current?.setRate(next.rate);
   }
-  return {state,preferences,server,toggle,navigate,updatePreferences,stop:()=>controller.current?.stop(),pause:()=>controller.current?.pause(),resume:()=>controller.current?.resume()};
+  return {state,preferences,server,toggle,navigate,updatePreferences,stop:()=>controller.current?.stop(),pause:()=>controller.current?.pause(),resume:()=>controller.current?.resume(),answer:(blockId:string)=>controller.current?.answer(blockId)};
 }

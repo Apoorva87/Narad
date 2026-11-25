@@ -7,7 +7,7 @@ export function SpeechControls({narration,disabled,dialogue,onPresent}:{narratio
   const [settings,setSettings]=useState(false);
   const {state,preferences,server}=narration;
   const active=state.status==='playing'||state.status==='loading';
-  const label=server?.state==='not-installed'?server.message:state.status==='loading'?(server?.state==='loading'?'Loading the local voice model…':'Preparing narration…'):state.status==='playing'?'Speaking · follows the passage':state.status==='paused'?'Paused':state.status==='ended'?'End of narration':state.status==='error'?state.error:'Listen with a local voice';
+  const label=server?.state==='not-installed'?server.message:state.status==='loading'?(server?.state==='loading'?'Loading the local voice model…':'Preparing narration…'):state.status==='playing'?'Speaking · follows the passage':state.waiting?'Your turn · answer to continue':state.status==='paused'?'Paused':state.status==='ended'?'End of narration':state.status==='error'?state.error:'Listen with a local voice';
   return <div className="speech-controls">
     <div className="speech-main">
       <button className="speech-play" aria-label={active?'Pause narration':'Play narration'} disabled={disabled||server?.state==='not-installed'} onClick={narration.toggle}>

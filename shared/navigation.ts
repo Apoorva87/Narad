@@ -9,8 +9,8 @@ export function moveBlock(lesson: Lesson, mode: Mode, blockId: string, offset: n
   const index = Math.max(0, blocks.findIndex(item => item.block.id === blockId));
   return blocks[Math.max(0, Math.min(blocks.length - 1, index + offset))];
 }
-/** The figure on screen at this passage: the most recent figure at or before it. */
+/** The visual on screen at this passage: the most recent figure or teaching diagram at or before it. */
 export function latestFigureIndex(blocks: LocatedBlock[], index: number): number {
-  for (let i = Math.min(index, blocks.length - 1); i >= 0; i--) if (blocks[i].block.kind === 'figure') return i;
+  for (let i = Math.min(index, blocks.length - 1); i >= 0; i--) if (blocks[i].block.kind === 'figure' || blocks[i].block.kind === 'diagram') return i;
   return -1;
 }

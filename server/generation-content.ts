@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { parseLesson, type Lesson } from '../shared/lesson';
+import { diagramIssues, parseLesson, type Lesson } from '../shared/lesson';
 import { isBlocking, type CapturedSource, type SourceAsset, type SourceBundle } from '../shared/sources';
-import { authoredSectionSchema, compileTeachingLesson, splitSourceSections, type AuthoredSection, type SourceSection, type Speakers } from './lesson-preparation';
+import { authoredSectionSchema, compileTeachingLesson, courseSchema, splitSourceSections, type AuthoredSection, type SourceSection, type Speakers } from './lesson-preparation';
 export type TeachingTask = { id: string; source: CapturedSource; section: SourceSection; assets: SourceAsset[] };
 export type TeachingOutput = { task: TeachingTask; teaching: AuthoredSection };
-export const agentSectionSchema = authoredSectionSchema.extend({ visuals: z.array(authoredSectionSchema.shape.visuals.element.extend({ dialogueTurns: authoredSectionSchema.shape.visuals.element.shape.dialogueTurns.unwrap() })), units: z.array(authoredSectionSchema.shape.units.element.extend({ question: z.string().nullable() })) });
+export const agentSectionSchema = authoredSectionSchema.extend({ visuals: z.array(authoredSectionSchema.shape.visuals.element.extend({ dialogueTurns: authoredSectionSchema.shape.visuals.element.shape.dialogueTurns.unwrap() })), units: z.array(authoredSectionSchema.shape.units.element.extend({ question: z.string().nullable(), slide: z.string().trim().min(1) })),
+  // Structured output needs every field present: a section without a useful diagram returns null for it.
+  course: courseSchema.extend({ checks: courseSchema.shape.checks.max(2), diagram: courseSchema.shape.diagram.unwrap() }) });
 function exactBatch<T extends z.ZodRawShape>(taskIds:string[],shape:T) {
   const ids=taskIds as [string,...string[]];
   return z.object({results:z.array(z.object({taskId:z.enum(ids),...shape})).length(taskIds.length)}).superRefine((batch,ctx)=>{
@@ -52,8 +54,9 @@ export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { 
 export function sectionHash(task: TeachingTask): string {
   return createHash('sha256').update(task.section.units.map(u=>u.markdown).join('\n\n')).update('\0').update(task.assets.map(a=>a.id).sort().join('\n')).digest('hex');
 }
+/** Numbers in a text, for the coverage check. Thousands separators are removed in every form an author may write them: `1,048,576`, LaTeX `1{,}048{,}576` and `1\,048\,576`. */
 export function numericTokens(text:string):Set<string> {
-  const cleaned=text.replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/https?:\/\/\S+/g,'').replace(/\\?\[\d+\\?\]/g,'').replace(/(\d),(?=\d{3})/g,'$1').replace(/^\s*`?\d+\.\s*/gm,'');
+  const cleaned=text.replace(/(\d)(?:\{,\}|\\[,;:!]|\u2009|\u202f)(?=\d{3}(?!\d))/g,'$1').replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/https?:\/\/\S+/g,'').replace(/\\?\[\d+\\?\]/g,'').replace(/(\d),(?=\d{3})/g,'$1').replace(/^\s*`?\d+\.\s*/gm,'');
   return new Set(cleaned.match(/(?<![A-Za-z_\d])\d+(?:\.\d+)?/g)??[]);
 }
 export function checkTeaching(task:TeachingTask, input:unknown):string[] {
@@ -86,6 +89,26 @@ export function checkTeaching(task:TeachingTask, input:unknown):string[] {
     });
   }
   if(teaching.visuals.some(v=>!task.assets.some(a=>a.id===v.id)) || new Set(teaching.visuals.map(v=>v.id)).size!==teaching.visuals.length) issues.push('Unexpected or duplicate visual IDs');
+  const course=teaching.course;
+  if(course) {
+    for(const unit of teaching.units) {
+      if(!unit.slide){issues.push(`Unit ${unit.id} needs a slide for the course.`);continue}
+      noSpeakerLabel(`Unit ${unit.id} slide`,unit.slide);
+      if(unit.slide.trim()===unit.walkthrough.trim())issues.push(`Unit ${unit.id} slide repeats the walkthrough; write a few short key points instead.`);
+      else if(unit.slide.length>700)issues.push(`Unit ${unit.id} slide is too long to read at a glance; keep it to a few short key points.`);
+    }
+    noSpeakerLabel('Course objective',course.objective);noSpeakerLabel('Course takeaway',course.takeaway);
+    course.checks.forEach((check,index)=>{
+      const name=`Check question ${index+1}`;
+      noSpeakerLabel(name,check.question);noSpeakerLabel(name+' spoken question',check.questionSpoken);noSpeakerLabel(name+' explanation',check.explanation);
+      if(check.answer>=check.options.length)issues.push(`${name} marks an answer that is not among its options.`);
+      if(new Set(check.options.map(option=>option.trim().toLowerCase())).size!==check.options.length)issues.push(`${name} repeats an option.`);
+      // Options are read aloud and shown in a different order, so they must be plain text that stands alone.
+      if(check.options.some(option=>/\$[^$]+\$|[\\`]|\*\*/.test(option)))issues.push(`${name} options must be plain text without Markdown or LaTeX.`);
+      if(check.options.some(option=>/\b(?:all|none|both|neither) of the (?:above|options)\b|\b(?:both|either) [a-d] (?:and|or) [a-d]\b/i.test(option)))issues.push(`${name} options must each stand alone; do not refer to other options.`);
+    });
+    if(course.diagram)issues.push(...diagramIssues(course.diagram));
+  }
   return issues;
 }
 const speakerPrefix=/(^|[.!?]\s+|\n\s*)(?:Host|Expert)\s*:\s*/gi;
@@ -125,14 +148,16 @@ export function compilePreparedBundle(bundle:SourceBundle, outputs:TeachingOutpu
         const output=outputs.find(o=>o.task.id===task.id);if(!output) throw new Error('Missing task '+task.id);
         const issues=checkTeaching(task,output.teaching);if(issues.length) throw new Error(issues.join('\n'));return output.teaching;
       });
-      return {...pieces[0],units:pieces.flatMap(p=>p.units),visuals:[...new Map(pieces.flatMap(p=>p.visuals).map(v=>[v.id,v])).values()]};
+      // A long section is written in several pieces: its course keeps the first goal, every check and takeaway, and the first diagram.
+      const courses=pieces.map(p=>p.course);const course=courses.every(c=>c)?{objective:courses[0]!.objective,takeaway:courses.map(c=>c!.takeaway).join('\n\n'),checks:courses.flatMap(c=>c!.checks).slice(0,4),diagram:courses.find(c=>c!.diagram)?.diagram}:undefined;
+      return {...pieces[0],units:pieces.flatMap(p=>p.units),visuals:[...new Map(pieces.flatMap(p=>p.visuals).map(v=>[v.id,v])).values()],course};
     });
     const part=compileTeachingLesson({id:'part-'+i,title:source.title,description:'Prepared teaching',topic:'Learning',bundle:{...bundle,sources:[{...source,kind:'article'}]},authored,summary:[{title:'In brief',markdown:'Prepared separately.',spokenText:'Prepared separately.'}],speakers:options.speakers});
     const prefix='r'+i+'-';const assetIds=new Map(part.assets.map(a=>[a.id,prefix+a.id]));
     const rewrite=(text:string)=>text.replace(/\]\((source-asset-[a-zA-Z0-9_-]+)\)/g,(match,asset:string)=>assetIds.has(asset)?']('+assetIds.get(asset)+')':match);
     part.assets=part.assets.map(a=>({...a,id:prefix+a.id}));
     part.sources=part.sources.map(s=>({...s,kind:source.kind==='article'?'article':'note',content:rewrite(s.content)}));
-    for(const mode of ['walkthrough','dialogue'] as const) part.modes[mode]!.sections=part.modes[mode]!.sections.map(s=>({...s,id:prefix+s.id,title:sources.length>1?source.title+' · '+s.title:s.title,blocks:s.blocks.map(b=>({...b,id:prefix+b.id,markdown:rewrite(b.markdown),...(b.kind==='figure'?{assetId:prefix+b.assetId}:{})}))}));
+    for(const mode of ['walkthrough','dialogue','course'] as const) if(part.modes[mode]) part.modes[mode].sections=part.modes[mode].sections.map(s=>({...s,id:prefix+s.id,title:sources.length>1?source.title+' · '+s.title:s.title,blocks:s.blocks.map(b=>({...b,id:prefix+b.id,markdown:rewrite(b.markdown),...(b.kind==='figure'?{assetId:prefix+b.assetId}:{})}))}));
     return part;
   });
   const allSources=parts.flatMap(p=>p.sources);
@@ -143,5 +168,7 @@ export function compilePreparedBundle(bundle:SourceBundle, outputs:TeachingOutpu
   return parseLesson({version:1,id,title:bundle.title,description:excerpt(synthesis.markdown),topic:'Learning',createdAt:new Date().toISOString(),sourceBundleId:bundle.id,isSample:false,familiarity:bundle.familiarity??'foundational',sources:allSources,assets:parts.flatMap(p=>p.assets),modes:{
     summary:{title:'Quick summary',sections:summary.map((s,i)=>({id:'summary-'+i,title:s.title,blocks:[{id:'summary-'+i,kind:'text',markdown:s.markdown,spokenText:s.spokenText,origin:'teaching',references:s.sourceIds.map(sourceId=>({sourceId,locator:allSources.find(source=>source.id===sourceId)?.locators[0]??'Unknown source'}))}]}))},
     walkthrough:{title:'Detailed walkthrough',sections:parts.flatMap(p=>p.modes.walkthrough!.sections)},dialogue:{title:'Tutor dialogue',sections:parts.flatMap(p=>p.modes.dialogue!.sections)},
+    // Sections saved before the course existed have no course material; the mode appears once every section has it.
+    ...(parts.every(p=>p.modes.course)&&{course:{title:'Course',sections:parts.flatMap(p=>p.modes.course!.sections)}}),
   }});
 }

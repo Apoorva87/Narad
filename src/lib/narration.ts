@@ -1,6 +1,7 @@
 import type { SpeechRequest, SpeechAudio, SpeechPace } from '../../shared/speech';
-export type NarrationItem = SpeechRequest & {pace?:SpeechPace;tutor?:{turnId:string;part:'question'|'answer'}};
-export type NarrationState = {status:'idle'|'loading'|'playing'|'paused'|'ended'|'error';blockId?:string;chunk?:number;tutor?:NarrationItem['tutor'];error?:string};
+/** `gate` marks the first chunk of a check question's explanation: narration waits there until the learner answers or presses Play. */
+export type NarrationItem = SpeechRequest & {pace?:SpeechPace;tutor?:{turnId:string;part:'question'|'answer'};gate?:boolean};
+export type NarrationState = {status:'idle'|'loading'|'playing'|'paused'|'ended'|'error';blockId?:string;chunk?:number;tutor?:NarrationItem['tutor'];part?:NarrationItem['part'];/** Paused at a check question, waiting for an answer. */waiting?:boolean;error?:string};
 export type NarrationProgress = {blockId:string;chunk:number;elapsed:number;duration:number};
 export interface AudioPort {
   src:string;currentTime:number;duration:number;playbackRate:number;preservesPitch:boolean;
@@ -25,14 +26,16 @@ export class NarrationController {
   private currentAudio?:SpeechAudio;
   private disposed=false;
   private prefetched=new Map<number,PrefetchedAudio>();
+  private waiting=false;
+  private answered=new Set<string>();
   constructor(private audio:AudioPort,private render:Render,private changed:(state:NarrationState)=>void,private progress:(value?:NarrationProgress)=>void=()=>{}) {audio.preservesPitch=true;}
   private update(status:NarrationState['status'],error?:string) {
     if(this.disposed)return;
-    this.state={status,blockId:this.items[this.index]?.blockId,chunk:this.items[this.index]?.chunk,tutor:this.items[this.index]?.tutor,error};this.changed(this.state);
+    this.state={status,blockId:this.items[this.index]?.blockId,chunk:this.items[this.index]?.chunk,tutor:this.items[this.index]?.tutor,part:this.items[this.index]?.part,...(this.waiting&&{waiting:true}),error};this.changed(this.state);
     if(status!=='playing')this.progress();
   }
   private invalidate(clearAudio:boolean) {
-    this.generation++;this.abort.abort();this.abort=new AbortController();
+    this.generation++;this.abort.abort();this.abort=new AbortController();this.waiting=false;
     for(const entry of this.prefetched.values())entry.audio?.release();this.prefetched.clear();
     this.audio.pause();this.audio.onended=null;this.audio.onerror=null;this.audio.ontimeupdate=null;
     if(clearAudio)this.releaseCurrent();
@@ -44,7 +47,7 @@ export class NarrationController {
   }
   replaceItems(items:NarrationItem[]) {
     if(!this.items.length||!['loading','playing','paused'].includes(this.state.status)){this.items=items;return true}
-    const current=this.items[this.index];const key=(item:NarrationItem)=>[item.lessonId,item.mode,item.blockId,item.chunk,item.tutor?.turnId??'',item.tutor?.part??''].join('|');
+    const current=this.items[this.index];const key=(item:NarrationItem)=>[item.lessonId,item.mode,item.blockId,item.chunk,item.part??'',item.tutor?.turnId??'',item.tutor?.part??''].join('|');
     const index=items.findIndex(item=>key(item)===key(current));if(index<0)return false;
     // Tutor polling rebuilds identical items every few seconds: keep audio already prefetched for an unchanged item
     // (same text position and voice) at its new index, so the single speech worker never renders the same chunk twice.
@@ -60,8 +63,10 @@ export class NarrationController {
   private effectiveRate(){const pace=this.items[this.index]?.pace??'normal';const factor=pace==='focus'?0.9:pace==='brisk'?1.06:1;return Math.max(0.5,Math.min(2,this.rate*factor));}
   setRate(rate:number){this.rate=Math.max(0.5,Math.min(2,rate));this.audio.playbackRate=this.effectiveRate();}
   pause(){if(!['playing','loading'].includes(this.state.status))return;this.invalidate(false);this.update('paused');}
-  resume(){if(this.disposed)return;if(this.state.status==='ended')this.index=0;const generation=this.generation;if(this.loaded)void this.play(generation);else void this.load(generation);}
+  resume(){if(this.disposed)return;this.waiting=false;if(this.state.status==='ended')this.index=0;const generation=this.generation;if(this.loaded)void this.play(generation);else void this.load(generation);}
   stop(){this.invalidate(true);this.update('idle');}
+  /** The learner answered this check question: narration no longer waits for it, and continues if it was waiting. */
+  answer(blockId:string){this.answered.add(blockId);if(this.waiting&&this.items[this.index]?.blockId===blockId)this.resume();}
   dispose(){this.stop();this.disposed=true;}
   private async load(generation:number) {
     const item=this.items[this.index];if(!item){this.update('ended');return;}
@@ -86,6 +91,8 @@ export class NarrationController {
       if(generation!==this.generation||this.state.status!=='playing')return;
       this.releaseCurrent();this.index++;
       if(this.index>=this.items.length){this.index=Math.max(0,this.items.length-1);this.update('ended');return;}
+      const next=this.items[this.index];
+      if(next.gate&&!this.answered.has(next.blockId)){this.waiting=true;this.update('paused');return;}
       void this.load(generation);
     };
     this.audio.onerror=()=>{if(generation===this.generation){this.invalidate(true);this.update('error','Could not play this audio. Press Play to retry.')}};

@@ -7,6 +7,8 @@ import type { NarrationItem } from './narration';
 export function buildNarrationItems(lesson:Lesson,mode:Mode,prefs:SpeechPreferences,replies:Record<string,TutorTurn[]>):NarrationItem[] {
   return flattenBlocks(lesson,mode).flatMap(({block})=>{
     const lessonItems=planSpeech(block.spokenText).map((segment,chunk)=>({lessonId:lesson.id,mode,blockId:block.id,chunk,voice:voiceFor(block,prefs),pace:segment.pace}));
+    // A check question is spoken first; its explanation follows once the learner has answered.
+    const explanation=block.kind==='quiz'?planSpeech(block.explanationSpoken).map((segment,chunk)=>({lessonId:lesson.id,mode,blockId:block.id,chunk,voice:voiceFor(block,prefs),pace:segment.pace,part:'explanation' as const,...(chunk===0&&{gate:true})})):[];
     const replyItems=(replies[block.id]??[]).flatMap(turn=>{
       if(!turn.answer)return[];
       const question=planSpeech(turn.question).map((segment,chunk)=>({lessonId:lesson.id,mode,blockId:block.id,chunk,voice:prefs.host,pace:segment.pace,tutor:{turnId:turn.id,part:'question' as const}}));
@@ -14,6 +16,6 @@ export function buildNarrationItems(lesson:Lesson,mode:Mode,prefs:SpeechPreferen
       const answer=planSpeech(answerText).map((segment,chunk)=>({lessonId:lesson.id,mode,blockId:block.id,chunk,voice:prefs.expert,pace:segment.pace,tutor:{turnId:turn.id,part:'answer' as const}}));
       return [...question,...answer];
     });
-    return [...lessonItems,...replyItems];
+    return [...lessonItems,...explanation,...replyItems];
   });
 }

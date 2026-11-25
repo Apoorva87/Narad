@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowDown, ArrowUp, BookOpen, Check, ChevronDown, Download, FileText, List, MessageCircle, AlignLeft, GraduationCap, Keyboard, MonitorPlay } from 'lucide-react';
+import { ArrowLeft, ArrowDown, ArrowUp, BookOpen, Check, ChevronDown, Download, FileText, List, MessageCircle, AlignLeft, GraduationCap, Keyboard, MonitorPlay, School } from 'lucide-react';
 import { modes, modeLabels, familiarityLabels, type Lesson, type Mode, type Progress } from '../../shared/lesson';
 import { flattenBlocks, latestFigureIndex, moveBlock } from '../../shared/navigation';
-import { planSpeech } from '../../shared/speech';
+import { planSpeech, spokenPart } from '../../shared/speech';
 import { artworkFor } from '../lib/artwork';
 import { api, exportLesson } from '../lib/api';
 import { LessonBlock } from './LessonBlock';
@@ -15,12 +15,14 @@ import { Modal } from './Modal';
 import { ReplyThread } from './ReplyThread';
 import { useTutor } from '../hooks/useTutor';
 import { useTutorPlayback } from '../hooks/useTutorPlayback';
+import { QuizBlock, type QuizState } from './QuizBlock';
 
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-const shortcuts: [string, string][] = [['Space or K', 'Play or pause narration'], ['→ or L', 'Next passage'], ['← or J', 'Previous passage'], ['Shift+→ / Shift+←', 'Next or previous section'], ['1 · 2 · 3', 'Switch learning mode'], ['− / +', 'Slower or faster'], ['P', 'Presentation mode'], ['T', 'Show or hide transcript while presenting'], ['A', 'Ask the tutor about this passage while presenting'], ['Esc', 'Leave presentation'], ['?', 'Show these shortcuts']];
+const shortcuts: [string, string][] = [['Space or K', 'Play or pause narration'], ['→ or L', 'Next passage'], ['← or J', 'Previous passage'], ['Shift+→ / Shift+←', 'Next or previous section'], ['1 · 2 · 3 · 4', 'Switch learning mode'], ['− / +', 'Slower or faster'], ['P', 'Presentation mode'], ['T', 'Show or hide transcript while presenting'], ['A', 'Ask the tutor about this passage while presenting'], ['Esc', 'Leave presentation'], ['?', 'Show these shortcuts']];
 const gestures: [string, string][] = [['Tap', 'Play or pause'], ['Swipe left / right', 'Next or previous passage'], ['Swipe down', 'Leave presentation'], ['Lock screen & headphones', 'Play, pause, skip passages']];
 
-const modeIcons = { summary: AlignLeft, walkthrough: BookOpen, dialogue: MessageCircle };
+const modeIcons = { summary: AlignLeft, walkthrough: BookOpen, dialogue: MessageCircle, course: School };
+const endNames = { summary: 'summary', walkthrough: 'walkthrough', dialogue: 'conversation', course: 'course' };
 export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void }) {
   const defaultMode = lesson.sourceBundleId && lesson.modes.summary ? 'summary' : lesson.modes.walkthrough ? 'walkthrough' : modes.find(mode => lesson.modes[mode])!;
   const [mode, setMode] = useState<Mode>(defaultMode);
@@ -45,6 +47,20 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
   const narration = useNarration(lesson,mode,activeId,blockId=>select(blockId,mode,false,true),followPlayback,tutor.playback);
   const tutorPlayback=useTutorPlayback();
   function toggleNarration(){tutorPlayback.stop();narration.toggle()}
+  // Check-question answers live only while the lesson is open, so a later visit is a fresh attempt. `first` records the first try.
+  const [quiz, setQuiz] = useState<Record<string, QuizState & { first?: boolean }>>({});
+  useEffect(() => setQuiz({}), [lesson.id]);
+  const quizBlocks = blocks.flatMap(item => item.block.kind === 'quiz' ? [item.block] : []);
+  function answerQuiz(blockId: string, choice: number) {
+    const correct = quizBlocks.find(block => block.id === blockId)?.answer === choice;
+    setQuiz(previous => ({ ...previous, [blockId]: { choice, first: previous[blockId]?.first ?? correct } }));
+    narration.answer(blockId);
+  }
+  const retryQuiz = (blockId: string) => setQuiz(previous => ({ ...previous, [blockId]: { first: previous[blockId]?.first } }));
+  // Narration that reaches the explanation of an unanswered question shows the answer it is explaining.
+  const explaining = narration.state.part === 'explanation' && narration.state.status === 'playing' ? narration.state.blockId : undefined;
+  useEffect(() => { if (explaining) setQuiz(previous => previous[explaining]?.choice !== undefined || previous[explaining]?.revealed ? previous : { ...previous, [explaining]: { revealed: true, first: previous[explaining]?.first ?? false } }); }, [explaining]);
+  const firstTry = quizBlocks.filter(block => quiz[block.id]?.first).length, attempted = quizBlocks.filter(block => quiz[block.id]?.first !== undefined).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +134,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
     else if (key === 'k') toggleNarration();
     else if (key === 'ArrowRight' || key === 'l') { if (event.shiftKey) sectionMove(1); else move(1); }
     else if (key === 'ArrowLeft' || key === 'j') { if (event.shiftKey) sectionMove(-1); else move(-1); }
-    else if (['1', '2', '3'].includes(key) && availableModes[Number(key) - 1]) changeMode(availableModes[Number(key) - 1]);
+    else if (['1', '2', '3', '4'].includes(key) && availableModes[Number(key) - 1]) changeMode(availableModes[Number(key) - 1]);
     else if (key === '-' || key === '_') changeRate(-1);
     else if (key === '=' || key === '+') changeRate(1);
     else if (key === 'p') { if (presenting) setPresenting(false); else present(); }
@@ -147,7 +163,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
   // Lock screen and headphone controls: the spoken sentence as the title, the current slide as artwork.
   const spokenIndex = narration.state.blockId ? blocks.findIndex(item => item.block.id === narration.state.blockId) : -1;
   const spoken = blocks[spokenIndex >= 0 ? spokenIndex : activeIndex];
-  const sentence = spoken ? planSpeech(spoken.block.spokenText)[spokenIndex >= 0 ? narration.state.chunk ?? 0 : 0]?.text : undefined;
+  const sentence = spoken ? planSpeech((spokenIndex >= 0 && spokenPart(spoken.block, narration.state.part)) || spoken.block.spokenText)[spokenIndex >= 0 ? narration.state.chunk ?? 0 : 0]?.text : undefined;
   const slideIndex = latestFigureIndex(blocks, spokenIndex >= 0 ? spokenIndex : activeIndex);
   const slide = slideIndex >= 0 && blocks[slideIndex].block.kind === 'figure' ? lesson.assets.find(asset => asset.id === (blocks[slideIndex].block as { assetId: string }).assetId)?.src : undefined;
   const speaker = spoken?.block.kind === 'dialogue' ? spoken.block.speaker : spoken?.section.title;
@@ -175,13 +191,14 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
       <main id="lesson-content" role="tabpanel" aria-labelledby={'tab-' + mode} className="lesson-content">
         {!ready ? <p role="status">Restoring your reading position…</p> : sections.map((section, index) => <section key={mode + section.id} className="lesson-section" aria-labelledby={'section-' + section.id}>
           <header className="section-heading"><span className="section-number">{String(index + 1).padStart(2, '0')}</span><div><h2 id={'section-' + section.id}>{section.title}</h2>{section.description && <p>{section.description}</p>}</div></header>
-          {section.blocks.map(block => <div className="passage-with-replies" key={mode + block.id}><LessonBlock block={block} lesson={lesson} active={block.id === activeId}
+          {section.blocks.map(block => <div className="passage-with-replies" key={mode + block.id}><LessonBlock block={block} lesson={lesson} active={block.id === activeId} slides={mode === 'course'} quiz={quiz[block.id]} onAnswer={choice => answerQuiz(block.id, choice)} onRetry={() => retryQuiz(block.id)}
             onSelect={() => select(block.id, mode, false)} onSource={(sourceId, locator) => {tutorPlayback.stop();narration.pause();setSource({ sourceId, locator })}} onVideoPlay={() => {tutorPlayback.stop();narration.pause()}} />
             {replyThread(section.id, block.id, tutor.expanded.has(block.id), () => tutor.toggle(block.id))}
           </div>)}
           {tutor.error&&<p className="reply-error" role="status">{tutor.error}</p>}
         </section>)}
-        <div className="lesson-end"><Check size={21} /><h3>You’ve reached the end of this {mode === 'dialogue' ? 'conversation' : mode === 'summary' ? 'summary' : 'walkthrough'}.</h3><p>{mode === 'summary' && lesson.modes.walkthrough ? 'There is more to understand in the detailed walkthrough.' : 'Revisit any section, or explore the same idea in another mode.'}</p>
+        <div className="lesson-end"><Check size={21} /><h3>You’ve reached the end of this {endNames[mode]}.</h3><p>{mode === 'summary' && lesson.modes.walkthrough ? 'There is more to understand in the detailed walkthrough.' : 'Revisit any section, or explore the same idea in another mode.'}</p>
+          {quizBlocks.length > 0 && <p className="quiz-score" role="status">{attempted === 0 ? `This course has ${quizBlocks.length} check ${quizBlocks.length === 1 ? 'question' : 'questions'} to try.` : `You got ${firstTry} of ${attempted} right on the first try` + (attempted < quizBlocks.length ? ` · ${quizBlocks.length - attempted} still to answer.` : '.')}</p>}
           {mode === 'summary' && lesson.modes.walkthrough && <button className="secondary-button" onClick={() => changeMode('walkthrough')}>Read the full walkthrough</button>}
         </div>
       </main>
@@ -201,7 +218,7 @@ export function Reader({ lesson, onBack }: { lesson: Lesson; onBack: () => void 
       </div>
     </footer>
     {source && <SourceDialog lesson={lesson} {...source} onVideoPlay={() => {tutorPlayback.stop();narration.pause()}} onClose={() => setSource(null)} />}
-    {presenting && current && <Presentation lesson={lesson} blocks={blocks} activeIndex={activeIndex} narration={{...narration,toggle:toggleNarration}} transcript={transcript} onTranscript={() => setTranscript(value => !value)} onMove={move} onExit={() => { setPresenting(false); setAskAt(null); }} askAt={askAt} onToggleAsk={toggleAsk} onAskCurrent={() => setAskAt(current.block.id)} renderThread={blockId => { const located = blocks.find(item => item.block.id === blockId); return located ? replyThread(located.section.id, blockId, true, () => {}) : null; }} />}
+    {presenting && current && <Presentation lesson={lesson} blocks={blocks} activeIndex={activeIndex} narration={{...narration,toggle:toggleNarration}} transcript={transcript} onTranscript={() => setTranscript(value => !value)} onMove={move} onExit={() => { setPresenting(false); setAskAt(null); }} askAt={askAt} onToggleAsk={toggleAsk} onAskCurrent={() => setAskAt(current.block.id)} renderQuiz={block => <QuizBlock block={block} state={quiz[block.id]} onAnswer={choice => answerQuiz(block.id, choice)} onRetry={() => retryQuiz(block.id)} />} renderThread={blockId => { const located = blocks.find(item => item.block.id === blockId); return located ? replyThread(located.section.id, blockId, true, () => {}) : null; }} />}
     {helpOpen && <Modal title="Shortcuts" onClose={() => setHelpOpen(false)}>
       <h3 className="shortcut-heading">Keyboard</h3><dl className="shortcut-list">{shortcuts.map(([keys, action]) => <div key={keys}><dt>{keys.split(' ').map((part, i) => /^(or|\/|·)$/.test(part) ? <span key={i}> {part} </span> : <kbd key={i}>{part}</kbd>)}</dt><dd>{action}</dd></div>)}</dl>
       <h3 className="shortcut-heading">Touch, in presentation mode</h3><dl className="shortcut-list">{gestures.map(([gesture, action]) => <div key={gesture}><dt>{gesture}</dt><dd>{action}</dd></div>)}</dl>

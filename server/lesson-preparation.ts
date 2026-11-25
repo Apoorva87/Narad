@@ -1,11 +1,19 @@
 import { z } from 'zod';
-import { parseLesson, type Lesson, type LessonBlock, type Section } from '../shared/lesson';
+import { diagramShape, parseLesson, type Lesson, type LessonBlock, type Section } from '../shared/lesson';
 import type { SourceBundle } from '../shared/sources';
 
 const prose = z.string().trim().min(1);
+export const checkSchema = z.object({ question: prose, questionSpoken: prose, options: z.array(prose).min(3).max(4), answer: z.number().int().min(0).max(3), explanation: prose, explanationSpoken: prose });
+/** What turns a section into one lesson of the Course mode: a goal, check questions, a takeaway and an optional concept map. */
+export const courseSchema = z.object({
+  objective: prose, takeaway: prose, checks: z.array(checkSchema).min(1).max(4),
+  diagram: z.object({ title: prose, caption: prose, spokenText: prose, ...diagramShape }).nullable().optional(),
+});
 export const authoredSectionSchema = z.object({
   id: prose, introduction: prose, hostQuestion: prose,
-  units: z.array(z.object({ id: prose, walkthrough: prose, walkthroughSpoken: prose, dialogue: prose, dialogueSpoken: prose, question: prose.optional() })),
+  // `slide` is the short on-screen text the Course mode shows while `walkthroughSpoken` is narrated.
+  units: z.array(z.object({ id: prose, walkthrough: prose, walkthroughSpoken: prose, dialogue: prose, dialogueSpoken: prose, question: prose.optional(), slide: prose.optional() })),
+  course: courseSchema.optional(),
   visuals: z.array(z.object({ id: prose, caption: prose, explanation: prose, spokenText: prose, dialogueTurns: z.array(z.object({ role: z.enum(['host', 'expert']), markdown: prose, spokenText: prose })).min(2).optional() })),
 });
 export type AuthoredSection = z.infer<typeof authoredSectionSchema>;
@@ -30,6 +38,21 @@ export function splitSourceSections(markdown: string): SourceSection[] {
     }));
     return { id, title: heading.replace(/^#+\s*/, '').replace(/\\\./g, '.').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'), units };
   });
+}
+
+/** A repeatable shuffle, so the correct option is not always first and a lesson compiles the same way every time. */
+function shuffled<T>(items: T[], seed: string): T[] {
+  let state = 2166136261;
+  for (const char of seed) state = Math.imul(state ^ char.charCodeAt(0), 16777619) >>> 0;
+  const next = () => (state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296;
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) { const j = Math.floor(next() * (i + 1)); [result[i], result[j]] = [result[j], result[i]]; }
+  return result;
+}
+const ordinals = ['First', 'Second', 'Third', 'Fourth', 'Fifth'];
+/** True when every section carries what the Course mode needs; older saved sections do not. */
+export function hasCourse(authored: AuthoredSection[]): boolean {
+  return authored.length > 0 && authored.every(section => section.course && section.units.every(unit => unit.slide));
 }
 
 export function compileTeachingLesson(input: TeachingInput): Lesson {
@@ -84,6 +107,39 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
     }
     return { id: section.id, title: section.title, blocks };
   });
+  // The course reuses the reviewed walkthrough narration: each unit is a short slide with the full explanation spoken over it.
+  const makeCourse = (): Section[] => layout.map(section => {
+    const teaching = authored.find(item => item.id === section.id)!; const course = teaching.course!;
+    const references = [{ sourceId: source.id, locator: section.title }];
+    const base = { references, origin: 'teaching' as const };
+    const blocks: LessonBlock[] = [{ ...base, id: 'c-' + section.id + '-goal', kind: 'callout', title: 'What you will learn', markdown: course.objective, spokenText: course.objective }];
+    for (const unit of section.units) {
+      if (unit.kind === 'note') {
+        const link = source.url ? ' [Open the original ↗](' + source.url + ')' : '';
+        blocks.push({ id: 'c-' + unit.id, kind: 'callout', title: 'Not captured', markdown: 'An interactive figure here could not be kept.' + link, spokenText: 'An interactive figure in the original article could not be kept here.', origin: 'source', references });
+        continue;
+      }
+      if (unit.kind !== 'figure') {
+        const explanation = teaching.units.find(item => item.id === unit.id)!;
+        blocks.push({ ...base, id: 'c-' + unit.id, kind: 'text', markdown: explanation.slide!, spokenText: explanation.walkthroughSpoken });
+        if (unit.kind === 'table') blocks.push({ id: 'c-' + unit.id + '-table', kind: 'text', markdown: unit.markdown, spokenText: 'The original table is shown here for reference.', origin: 'source', references });
+      }
+      for (const assetId of unit.assetIds) {
+        const visual = teaching.visuals.find(item => item.id === assetId)!;
+        blocks.push({ ...base, id: 'c-' + unit.id + '-' + assetId, kind: 'figure', assetId, markdown: visual.explanation, spokenText: visual.spokenText });
+      }
+    }
+    if (course.diagram) { const { caption, ...diagram } = course.diagram; blocks.push({ ...base, id: 'c-' + section.id + '-map', kind: 'diagram', markdown: caption, ...diagram }); }
+    course.checks.forEach((check, i) => {
+      const id = 'c-' + section.id + '-check-' + i;
+      const options = shuffled(check.options.map((text, index) => ({ text, correct: index === check.answer })), source.id + id);
+      blocks.push({ ...base, id, kind: 'quiz', markdown: check.question, options: options.map(option => option.text), answer: options.findIndex(option => option.correct),
+        spokenText: check.questionSpoken.replace(/\s*$/, '') + ' ' + options.map((option, n) => `${ordinals[n]} option: ${option.text.replace(/[.?!]*$/, '')}.`).join(' '),
+        explanation: check.explanation, explanationSpoken: check.explanationSpoken });
+    });
+    blocks.push({ ...base, id: 'c-' + section.id + '-takeaway', kind: 'callout', title: 'Key takeaway', markdown: course.takeaway, spokenText: course.takeaway });
+    return { id: section.id, title: section.title, blocks };
+  });
   if (!input.summary.length) throw new Error('Provide a quick summary.');
   return parseLesson({ version: 1, id: input.id, title: input.title, description: input.description, topic: input.topic,
     sourceBundleId: input.bundle.id, createdAt: new Date().toISOString(), isSample: false, familiarity: 'foundational',
@@ -92,6 +148,7 @@ export function compileTeachingLesson(input: TeachingInput): Lesson {
       summary: { title: 'Quick summary', sections: input.summary.map((section, i) => ({ id: 'summary-' + i, title: section.title, blocks: [{ id: 'summary-' + i, kind: 'text', markdown: section.markdown, spokenText: section.spokenText, origin: 'teaching', references: (section.sourceSections ?? [layout[0].id]).map(id => ({ sourceId: source.id, locator: layout.find(item => item.id === id)?.title ?? id })) }] })) },
       walkthrough: { title: 'Detailed walkthrough', sections: makeMode('walkthrough') },
       dialogue: { title: 'Tutor dialogue', sections: makeMode('dialogue') },
+      ...(hasCourse(authored) && { course: { title: 'Course', sections: makeCourse() } }),
     },
   });
 }

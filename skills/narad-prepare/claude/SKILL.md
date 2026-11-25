@@ -1,6 +1,6 @@
 ---
 name: narad-prepare
-description: Create a Narad lesson (quick summary, detailed walkthrough, tutor dialogue) from article links, notes, a topic, or images, using the local Narad app. Use when the user asks to make, prepare, continue, or check a Narad lesson or analysis.
+description: Create a Narad lesson (quick summary, detailed walkthrough, tutor dialogue, course) from article links, notes, a topic, or images, using the local Narad app. Use when the user asks to make, prepare, continue, or check a Narad lesson or analysis.
 ---
 
 Narad runs locally; drive it with its command-line helper through the Bash tool. Run every command from the Narad repository:

@@ -155,3 +155,35 @@ Items moved from SQLite into one folder each under `data/library/` (sources, med
 - One-time migration backs up `narad.sqlite` to `data/backups/`, writes folders, moves old job files into `runs/legacy-*`, and salvages finished sections of interrupted runs so Continue resumes them. On any failure SQLite stays untouched and migration retries at the next start.
 - Follow-ups: token usage (input, output, cached, cost where known) is recorded per run in `progress.json` and shown in the preparation panel; presentation mode has an Ask tutor panel (`A`) tied to the passage it was opened on.
 - Lesson queue: Settings → Preparation → **Lessons at once** (1–5, default 1) prepares several items in parallel; further starts queue FIFO (persisted as `queued` for display, never auto-started after a restart) and start when a slot frees.
+
+## Course mode
+
+User asked for a "Course" style of lesson: audio-visual and interactive, produced by Narad alongside the existing modes. Ideas were weighed against OpenMAIC, but nothing was copied from it.
+
+- A fourth mode, `course`. Each source section becomes one lesson: a goal, key-point slides narrated with the reviewed walkthrough narration, the source figures and tables, an optional teaching diagram, one or two check questions, and a takeaway.
+- Two new block kinds, `diagram` and `quiz`, both data-only: Narad lays out and draws the diagram and renders the quiz. Check options are shuffled deterministically at compile time.
+- Narration speaks a check question, waits for an answer (or Play), then speaks the explanation. Presentation mode holds a diagram on screen like a figure and shows the question to answer.
+- Course material is written and reviewed in the existing per-section agent call (`courseGuidance` prompt, editable in Settings), so there are no extra agent calls. Sections saved before this feature have none; the Course tab appears once every section has it.
+- The gradient-descent sample carries a hand-written Course. Existing libraries keep their old sample, because seeding never overwrites.
+- A real Claude run on a two-section test article returned schema-valid course material on the first call, and the independent review examined the check explanations. The run was stopped during revision to limit spend, so no agent-written course has been published and read end to end yet.
+
+Found and fixed along the way:
+
+- The numeric coverage check treated LaTeX thousands separators (`1{,}048{,}576`) as a missing number, which cost a full extra section rewrite. It now reads them as one number.
+- Library rows for saved sources said "Awaiting preparation" while a run was active; they now show progress, queue position, or that a run stopped.
+- Content-hashed build files are served as immutable, so repeat visits skip revalidation.
+- The contextual tutor now receives a check question's options and explanation and a diagram's boxes and arrows; `lesson.md` exports both readably.
+
+## Breeze TTS 2 as the default voice
+
+User asked for Breeze TTS 2 as the local default with the ability to switch back to Qwen3-TTS.
+
+- `Settings → Voice → Voice model` chooses the model; the default is Breeze. One Python worker runs at a time and is replaced when the choice changes. If the chosen model is not installed, the other installed model speaks and the voice status says so.
+- Breeze has no preset speakers, so each Narad voice is designed once from a description and continued from a saved clip of one fixed sentence. Lesson audio is still never saved.
+- Full-precision weights without classifier-free guidance: 1.75× real time on the M4 Max (0.57 seconds per second of audio). With guidance at 2 it was 1.25× real time. The 8-bit build measured 2.4× real time and was not chosen, because a community comparison reported audibly lower quality. Qwen3-TTS runs at about 4.5× real time.
+- A speech recogniser transcribed Breeze output word for word, with and without guidance. Nobody has yet judged the voices by ear; that is the user's call.
+- The Docker path carries the choice to the macOS voice host with each request.
+
+## Public website plan
+
+`docs/public-website-plan.md` describes how to publish Narad as a free website: API keys kept in the visitor's browser, voice generated in the browser, per-account storage behind a login. Nothing in it is built.

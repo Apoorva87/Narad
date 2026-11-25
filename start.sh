@@ -88,7 +88,7 @@ start_tts() {
     stop_tts
   fi
   rm -f "$tts_pid_file"
-  if [[ ! -x speech/.venv/bin/python || ! -f data/models/qwen3-tts/model.safetensors ]]; then
+  if [[ ! -x speech/.venv/bin/python || ( ! -f data/models/breeze-tts-2/model-00002-of-00002.safetensors && ! -f data/models/qwen3-tts/model.safetensors ) ]]; then
     echo "MLX speech is not installed on this Mac. Run ./setup.sh --with-speech first." >&2
     return 1
   fi

@@ -5,10 +5,14 @@ import { Markdown } from './Markdown';
 import { Modal } from './Modal';
 import { CreditLine } from './CreditLine';
 import { VideoEmbed } from './VideoEmbed';
+import { ConceptDiagram } from './ConceptDiagram';
+import { QuizBlock, type QuizState } from './QuizBlock';
 
-export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideoPlay }: {
+export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideoPlay, slides, quiz, onAnswer, onRetry }: {
   block: Block; lesson: Lesson; active: boolean; onSelect: () => void;
   onSource: (sourceId: string, locator?: string) => void; onVideoPlay?: () => void;
+  /** Course mode: a passage shows short key points while narration says more, so the narration text is offered for reading. */
+  slides?: boolean; quiz?: QuizState; onAnswer?: (choice: number) => void; onRetry?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -27,7 +31,10 @@ export function LessonBlock({ block, lesson, active, onSelect, onSource, onVideo
       <figcaption><span className="figure-origin">{asset.provenance === 'source' ? 'Source figure' : 'Teaching diagram'}</span>{asset.caption}</figcaption>
       {asset.credit && <p className="figure-credit"><CreditLine credit={asset.credit} /></p>}
     </figure>}
-    <Markdown onVideoPlay={onVideoPlay} assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>
+    {block.kind === 'diagram' ? <ConceptDiagram title={block.title} caption={block.markdown} nodes={block.nodes} edges={block.edges} />
+      : block.kind === 'quiz' ? <QuizBlock block={block} state={quiz} onAnswer={choice => onAnswer?.(choice)} onRetry={() => onRetry?.()} />
+      : <Markdown onVideoPlay={onVideoPlay} assets={lesson.assets.map(asset => ({ ...asset, kind: asset.kind ?? 'image' }))}>{block.markdown}</Markdown>}
+    {slides && block.kind === 'text' && block.origin === 'teaching' && block.spokenText.trim() !== block.markdown.trim() && <details className="spoken-notes"><summary>What the tutor says</summary><p>{block.spokenText}</p></details>}
     <div className="block-attribution">
       {block.references.map(ref => <button key={ref.sourceId + ref.locator} onClick={() => onSource(ref.sourceId, ref.locator)}><BookOpen size={12} />{ref.locator}</button>)}
       {block.origin === 'teaching' && <span>Added explanation</span>}

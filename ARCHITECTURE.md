@@ -1,6 +1,6 @@
 # Narad architecture
 
-Narad is a local single-user learning system. A React reader talks to one loopback Express process; SQLite and saved image assets remain on the host. Codex or Claude prepares lessons and answers contextual questions. Qwen3-TTS runs as a long-lived local Python worker and returns short-lived WAV responses that are never saved.
+Narad is a local single-user learning system. A React reader talks to one loopback Express process; SQLite and saved image assets remain on the host. Codex or Claude prepares lessons and answers contextual questions. A local voice model (Breeze TTS 2 by default, or Qwen3-TTS) runs as a long-lived local Python worker and returns short-lived WAV responses that are never saved.
 
 ## Main flow
 
@@ -14,12 +14,14 @@ flowchart LR
   AR --> C[Codex CLI]
   AR --> CL[Claude CLI]
   API --> SW[Local speech worker]
-  SW --> Q[Qwen3-TTS / MLX]
+  SW --> Q[Breeze TTS 2 or Qwen3-TTS / MLX]
 ```
 
 ## Content boundary
 
 `shared/lesson.ts` is the saved lesson contract. A lesson contains sources, local assets, modes, sections, and stable blocks. Display Markdown/math and natural `spokenText` are stored together. Source-derived blocks carry references; teaching additions carry provenance.
+
+The course mode adds two block kinds that keep the same rule as tutor answers: agents supply data, never markup. A `diagram` block is a list of boxes and labelled arrows that `src/lib/diagram-layout.ts` places and `ConceptDiagram` draws. A `quiz` block holds options, the correct index and an explanation; `server/lesson-preparation.ts` shuffles the options deterministically at compile time. In narration a quiz contributes its question, then its explanation behind a gate: `NarrationController` pauses at the gate until the reader answers or presses Play.
 
 Source capture and preparation use `server/store.ts`, `server/intake.ts`, `server/preparation.ts`, and `server/agent-runner.ts`. The preparation service owns at most one active authoring/review job and retains drafts under `data/preparation/`.
 
@@ -71,7 +73,8 @@ MLX remains a macOS host process because Docker Desktop Linux guests cannot use 
 | Tutor turns | `data/tutor.sqlite` | Persistent |
 | Preparation drafts and agent logs | `data/preparation/` | Persistent until removed with their source collection |
 | Tutor agent prompts/results/logs | `data/tutor/<turn-id>/` | Persistent for diagnosis |
-| TTS model | `data/models/qwen3-tts/` | Persistent installation |
+| TTS models | `data/models/breeze-tts-2/`, `data/models/qwen3-tts/` | Persistent installation |
+| Breeze voice reference clips (one fixed sentence per voice, no lesson content) | `data/models/breeze-tts-2/narad-voices/` | Created on first use |
 | Generated WAV chunks | Browser memory / HTTP response | Released after playback, navigation, or cancellation |
 
 `NARAD_DATA_DIR` relocates application data. Back up SQLite databases only after stopping Narad, or use SQLite backup tooling against a running process.

@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, LoaderCircle, RotateCcw } from 'lucide-react';
 import { familiarities, familiarityLabels } from '../../shared/lesson';
 import { providers } from '../../shared/preparation';
-import { voices } from '../../shared/speech';
+import { speechEngineLabels, speechEngines, voices } from '../../shared/speech';
 import { promptInfo, settingsSchema, slotDescriptions, type PromptKey, type Settings } from '../../shared/settings';
 import { api } from '../lib/api';
 import { replaceSettings } from '../lib/settings';
 
 type Section = keyof Settings;
 const sections: { id: string; title: string; description: string }[] = [
-  { id: 'modes', title: 'Learning modes', description: 'How the brief summary, detailed walkthrough, tutor dialogue and figure explanations are written.' },
+  { id: 'modes', title: 'Learning modes', description: 'How the brief summary, detailed walkthrough, tutor dialogue, course and figure explanations are written.' },
   { id: 'teaching', title: 'Teaching principles', description: 'Editable pedagogy sent with every step. Narad adds a separate fixed trust policy that source material and learner text cannot override.' },
   { id: 'steps', title: 'Agent steps', description: 'The full instruction for each step of preparation. Slots in {{braces}} are filled in when a preparation runs.' },
   { id: 'preparation', title: 'Preparation', description: 'Which agent and model to use, and how hard the reviewer works.' },
@@ -18,7 +18,7 @@ const sections: { id: string; title: string; description: string }[] = [
   { id: 'voice', title: 'Voice', description: 'Default narration voices, speed and speaking style.' },
 ];
 const promptsBySection: Record<string, PromptKey[]> = {
-  modes: ['summary', 'walkthroughGuidance', 'dialogueGuidance', 'visualGuidance'],
+  modes: ['summary', 'walkthroughGuidance', 'dialogueGuidance', 'courseGuidance', 'visualGuidance'],
   teaching: ['principles', 'levelFoundational', 'levelSomeBackground', 'levelAdvanced'],
   steps: ['research', 'section', 'revision', 'review'],
   voice: ['hostStyle', 'tutorStyle'],
@@ -92,6 +92,7 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             <TextField label="Tutor name" hint="The expert voice in the dialogue." {...field('lessons', 'expertName')} />
           </div>}
           {section.id === 'voice' && <div className="settings-grid">
+            <ChoiceField label="Voice model" hint="Runs on this Mac. If the chosen model is not installed, Narad uses the other one. Breeze TTS 2 is licensed for personal and research use only." {...field('voice', 'engine')} options={speechEngines.map(engine => [engine, speechEngineLabels[engine]])} />
             <ChoiceField label="Narrator voice" {...field('voice', 'narrator')} options={voices.map(voice => [voice, voice])} />
             <ChoiceField label="Host voice" {...field('voice', 'host')} options={voices.map(voice => [voice, voice])} />
             <ChoiceField label="Tutor voice" {...field('voice', 'expert')} options={voices.map(voice => [voice, voice])} />

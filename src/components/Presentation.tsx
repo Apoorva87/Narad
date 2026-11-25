@@ -1,18 +1,20 @@
 import { useEffect, useRef, type ReactNode, type TouchEvent } from 'react';
 import { Captions, CaptionsOff, LoaderCircle, MessageCircleQuestion, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
-import type { Lesson } from '../../shared/lesson';
+import type { Lesson, LessonBlock } from '../../shared/lesson';
 import { latestFigureIndex, type LocatedBlock } from '../../shared/navigation';
 import type { useNarration } from '../hooks/useNarration';
 import { Markdown } from './Markdown';
 import { CreditLine } from './CreditLine';
 import { VideoEmbed } from './VideoEmbed';
+import { ConceptDiagram } from './ConceptDiagram';
 
 /** Podcast-style view: narration plays while the most recent figure stays on screen until the next one. */
-export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit, askAt, onToggleAsk, onAskCurrent, renderThread }: {
+export function Presentation({ lesson, blocks, activeIndex, narration, transcript, onTranscript, onMove, onExit, askAt, onToggleAsk, onAskCurrent, renderThread, renderQuiz }: {
   lesson: Lesson; blocks: LocatedBlock[]; activeIndex: number; narration: ReturnType<typeof useNarration>;
   transcript: boolean; onTranscript: () => void; onMove: (offset: number) => void; onExit: () => void;
   /** Block the Ask tutor panel was opened on, or null when closed. Threads belong to a passage, so the panel stays on it while narration moves on. */
   askAt: string | null; onToggleAsk: () => void; onAskCurrent: () => void; renderThread: (blockId: string) => ReactNode;
+  renderQuiz: (block: Extract<LessonBlock, { kind: 'quiz' }>) => ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const exitRef = useRef(onExit); exitRef.current = onExit;
@@ -24,7 +26,7 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
   const askIndex = askAt ? blocks.findIndex(item => item.block.id === askAt) : -1;
   const { state, server, preferences } = narration;
   const active = state.status === 'playing' || state.status === 'loading';
-  const status = server?.state === 'not-installed' ? server.message : state.status === 'loading' ? (server?.state === 'loading' ? 'Loading the local voice model…' : 'Preparing narration…') : state.status === 'paused' ? 'Paused' : state.status === 'ended' ? 'End of lesson' : state.status === 'error' ? state.error : '';
+  const status = server?.state === 'not-installed' ? server.message : state.status === 'loading' ? (server?.state === 'loading' ? 'Loading the local voice model…' : 'Preparing narration…') : state.waiting ? 'Your turn — pick an answer to continue' : state.status === 'paused' ? 'Paused' : state.status === 'ended' ? 'End of lesson' : state.status === 'error' ? state.error : '';
 
   useEffect(() => {
     const element = root.current!; let entered = false; let lock: { release(): Promise<void> } | undefined;
@@ -63,11 +65,14 @@ export function Presentation({ lesson, blocks, activeIndex, narration, transcrip
     <div className={'presentation-stage' + (transcript ? '' : ' no-transcript')}>
       {asset
         ? <figure key={asset.id} className="presentation-figure">{asset.kind === 'video' && asset.video ? <VideoEmbed video={asset.video} title={asset.alt} poster={asset.src} onPlay={narration.pause} /> : <img src={asset.src} alt={asset.alt} />}<figcaption>{asset.caption}</figcaption>{asset.credit && <p className="figure-credit"><CreditLine credit={asset.credit} /></p>}</figure>
+        : figure?.kind === 'diagram' ? <div key={figure.id} className="presentation-figure presentation-diagram"><ConceptDiagram title={figure.title} caption={figure.markdown} nodes={figure.nodes} edges={figure.edges} /></div>
         : <div key="title" className="presentation-title-card"><img src="/narad-mark.svg" alt="" /><h2>{current.section.title}</h2><p>{lesson.title}</p></div>}
       {transcript && <div className="presentation-transcript" aria-live="polite">
         {current.block.kind === 'dialogue' && <span className={'presentation-speaker ' + current.block.role}>{current.block.speaker}</span>}
         {current.block.kind === 'equation' && <Markdown>{'$$\n' + current.block.latex + '\n$$'}</Markdown>}
-        <Markdown onVideoPlay={narration.pause} assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>
+        {current.block.kind === 'callout' && <span className="presentation-speaker">{current.block.title}</span>}
+        {current.block.kind === 'quiz' ? renderQuiz(current.block)
+          : <Markdown onVideoPlay={narration.pause} assets={lesson.assets.map(item => ({ ...item, kind: item.kind ?? 'image' }))}>{current.block.markdown}</Markdown>}
       </div>}
     </div>
     {askIndex >= 0 && <aside className="presentation-ask" aria-label="Tutor conversation">

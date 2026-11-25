@@ -6,7 +6,8 @@ import { RemoteSpeechWorker } from './remote-speech-worker';
 import type { SpeechEngine } from './speech';
 
 type Environment=Record<string,string|undefined>;
-const speechModel='Qwen3-TTS-1.7B-CustomVoice-8bit@41d3337-mlx0.6.0';
+/** Shown until the macOS voice host reports which model it is using. */
+const speechModel='Local voice';
 
 export function createRuntimeServices(env:Environment=process.env):{agent:AgentRunner;speech:SpeechEngine;bindHost:string}{
   let agent:AgentRunner=cliRunner;

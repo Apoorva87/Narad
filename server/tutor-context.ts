@@ -3,7 +3,10 @@ import { flattenBlocks } from '../shared/navigation';
 import type { TutorTurn } from '../shared/tutor';
 
 function lessonBlock(block: LessonBlock) {
-  return { id: block.id, kind: block.kind, markdown: block.markdown, spokenText: block.spokenText, references: block.references, origin: block.origin };
+  return { id: block.id, kind: block.kind, markdown: block.markdown, spokenText: block.spokenText, references: block.references, origin: block.origin,
+    // A question about a check or a diagram needs what the learner sees: the options and the reasoning, or the boxes and arrows.
+    ...(block.kind === 'quiz' && { options: block.options, correctOption: block.options[block.answer], explanation: block.explanation }),
+    ...(block.kind === 'diagram' && { title: block.title, nodes: block.nodes, edges: block.edges }) };
 }
 
 export function buildTutorContext(lesson: Lesson, mode: Mode, blockId: string, turns: TutorTurn[]) {

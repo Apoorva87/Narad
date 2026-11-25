@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-export const modes = ['summary', 'walkthrough', 'dialogue'] as const;
+export const modes = ['summary', 'walkthrough', 'dialogue', 'course'] as const;
 export type Mode = typeof modes[number];
 export const modeLabels: Record<Mode, string> = {
-  summary: 'Quick summary', walkthrough: 'Detailed walkthrough', dialogue: 'Tutor dialogue',
+  summary: 'Quick summary', walkthrough: 'Detailed walkthrough', dialogue: 'Tutor dialogue', course: 'Course',
 };
 export const familiarities = ['foundational', 'some-background', 'advanced'] as const;
 export type Familiarity = typeof familiarities[number];
@@ -16,12 +16,32 @@ const common = {
   references: z.array(reference),
   origin: z.enum(['source', 'teaching']),
 };
+/** A teaching diagram drawn by Narad from named boxes and labelled arrows; the agent never supplies drawing code. */
+export const diagramShape = {
+  nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().trim().min(1).max(120) })).min(2).max(8),
+  edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().trim().max(80).nullable() })).min(1).max(12),
+};
+/** Problems that make a diagram undrawable: an arrow to a box that does not exist, a repeated box, or a box nothing connects to. */
+export function diagramIssues(diagram: { nodes: { id: string }[]; edges: { from: string; to: string }[] }): string[] {
+  const ids = diagram.nodes.map(node => node.id); const known = new Set(ids); const issues: string[] = [];
+  if (known.size !== ids.length) issues.push('Diagram box IDs must be unique.');
+  for (const edge of diagram.edges) {
+    for (const end of [edge.from, edge.to]) if (!known.has(end)) issues.push('Diagram arrow refers to a missing box: ' + end + '.');
+    if (edge.from === edge.to) issues.push('Diagram arrow starts and ends at the same box: ' + edge.from + '.');
+  }
+  for (const id of known) if (!diagram.edges.some(edge => edge.from === id || edge.to === id)) issues.push('Diagram box has no arrow: ' + id + '.');
+  return issues;
+}
 const blockSchema = z.discriminatedUnion('kind', [
   z.object({ ...common, kind: z.literal('text') }),
   z.object({ ...common, kind: z.literal('equation'), latex: text }),
   z.object({ ...common, kind: z.literal('figure'), assetId: id }),
   z.object({ ...common, kind: z.literal('callout'), title: text }),
   z.object({ ...common, kind: z.literal('dialogue'), speaker: text, role: z.enum(['host', 'expert']) }),
+  // `markdown` is the caption shown under the drawing.
+  z.object({ ...common, kind: z.literal('diagram'), title: text, ...diagramShape }),
+  // `markdown`/`spokenText` ask the question; narration waits for an answer before it speaks the explanation.
+  z.object({ ...common, kind: z.literal('quiz'), options: z.array(text).min(2).max(5), answer: z.number().int().min(0), explanation: text, explanationSpoken: text }),
 ]);
 const sourceSchema = z.object({
   id, title: text, kind: z.enum(['note', 'article', 'paper']),
@@ -64,7 +84,7 @@ export const lessonSchema = z.object({
   sourceBundleId: id.optional(),
   familiarity: z.enum(familiarities),
   sources: z.array(sourceSchema).min(1), assets: z.array(assetSchema),
-  modes: z.object({ summary: modeSchema.optional(), walkthrough: modeSchema.optional(), dialogue: modeSchema.optional() }),
+  modes: z.object({ summary: modeSchema.optional(), walkthrough: modeSchema.optional(), dialogue: modeSchema.optional(), course: modeSchema.optional() }),
 }).superRefine((lesson, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
   const unique = (values: string[], name: string) => {
@@ -86,6 +106,8 @@ export const lessonSchema = z.object({
         else if (!source.locators.includes(ref.locator)) issue('Block ' + block.id + ' references missing location ' + ref.locator + '.');
       }
       if (block.kind === 'figure' && !lesson.assets.some(a => a.id === block.assetId)) issue('Block ' + block.id + ' references missing image ' + block.assetId + '.');
+      if (block.kind === 'quiz' && block.answer >= block.options.length) issue('Block ' + block.id + ' marks an answer that is not among its options.');
+      if (block.kind === 'diagram') for (const problem of diagramIssues(block)) issue('Block ' + block.id + ': ' + problem);
     }
   }
 });

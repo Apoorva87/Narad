@@ -738,6 +738,362 @@
             ]
           }
         ]
+      },
+      "course": {
+        "title": "Course",
+        "sections": [
+          {
+            "id": "slope",
+            "title": "A gradient tells you how the function changes",
+            "blocks": [
+              {
+                "id": "c-slope-goal",
+                "kind": "callout",
+                "title": "What you will learn",
+                "markdown": "Read a derivative as a statement about small, local changes, and say why “local” limits how far you can trust it.",
+                "spokenText": "Read a derivative as a statement about small, local changes, and say why “local” limits how far you can trust it.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-g-intro",
+                "kind": "text",
+                "markdown": "- Goal: minimize $f(x)=x^2$\n- The minimum is at $x=0$\n- A simple curve for a rule that works on harder ones",
+                "spokenText": "Suppose we want to minimize f of x equals x squared. Its minimum is at zero. We use this simple curve to understand a rule that also works when the minimum is harder to find.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Slope"
+                  }
+                ],
+                "origin": "source"
+              },
+              {
+                "id": "c-g-derivative",
+                "kind": "equation",
+                "markdown": "- The derivative measures **local** change\n- At $x=3$ the slope is $6$\n- A small step in $x$ changes $f(x)$ by about six times that step",
+                "spokenText": "The derivative is two x. At x equals three, the slope is six. For a small positive change in x, the function increases by approximately six times that change.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Slope"
+                  }
+                ],
+                "origin": "source",
+                "latex": "f'(x)=2x,\\qquad f'(3)=6"
+              },
+              {
+                "id": "c-g-tangent",
+                "kind": "callout",
+                "markdown": "- A derivative describes the tangent at **one point**\n- It promises nothing about a large jump\n- So the size of a step matters",
+                "spokenText": "Local matters. A derivative describes the tangent at one point. It doesn't promise that the same slope holds over a large jump.",
+                "references": [],
+                "origin": "teaching",
+                "title": "A slope is a local description"
+              },
+              {
+                "id": "c-slope-check-0",
+                "kind": "quiz",
+                "markdown": "At $x=3$ the slope of $f(x)=x^2$ is $6$. What does that tell you?",
+                "spokenText": "At x equals three, the slope of x squared is six. What does that tell you? First option: a small increase in x raises f of x by about six times that increase. Second option: the function has the value six at this point. Third option: any increase in x, however large, raises f of x by exactly six times that increase.",
+                "options": [
+                  "A small increase in x raises f(x) by about six times that increase",
+                  "The function has the value six at this point",
+                  "Any increase in x, however large, raises f(x) by exactly six times that increase"
+                ],
+                "answer": 0,
+                "explanation": "The slope is a rate of change that holds only near the point. Here $f(3)=9$, not $6$, and over a large jump the curve bends away from its tangent, so the six-times rule stops being accurate.",
+                "explanationSpoken": "The slope is a rate of change that holds only near the point. The function value at three is nine, not six. And over a large jump the curve bends away from its tangent, so the six times rule stops being accurate.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-slope-takeaway",
+                "kind": "callout",
+                "title": "Key takeaway",
+                "markdown": "A derivative is local information: it tells you how the function changes for a small move from where you stand.",
+                "spokenText": "A derivative is local information: it tells you how the function changes for a small move from where you stand.",
+                "references": [],
+                "origin": "teaching"
+              }
+            ]
+          },
+          {
+            "id": "update",
+            "title": "Take a controlled step downhill",
+            "blocks": [
+              {
+                "id": "c-update-goal",
+                "kind": "callout",
+                "title": "What you will learn",
+                "markdown": "Carry out one gradient descent step by hand and explain what the minus sign and the learning rate each do.",
+                "spokenText": "Carry out one gradient descent step by hand and explain what the minus sign and the learning rate each do.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-g-rule",
+                "kind": "equation",
+                "markdown": "- Subtract learning rate × derivative\n- The **minus sign** picks the downhill direction\n- The **learning rate** $\\eta$ sets the step length",
+                "spokenText": "Gradient descent subtracts the learning rate times the derivative. The minus sign chooses the local downhill direction. The positive learning rate controls how far we move.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ],
+                "origin": "source",
+                "latex": "x_{t+1}=x_t-\\eta f'(x_t)"
+              },
+              {
+                "id": "c-g-step",
+                "kind": "equation",
+                "markdown": "- Start at $x_0=3$ with $\\eta=0.1$\n- Step: $0.1\\times6=0.6$\n- New point $2.4$; loss falls from $9$ to $5.76$",
+                "spokenText": "Starting at three with learning rate zero point one, the step is zero point six. Subtract that from three to get two point four. The loss drops from nine to five point seven six.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Update rule"
+                  }
+                ],
+                "origin": "source",
+                "latex": "x_1=3-0.1(6)=2.4,\\qquad f(x_1)=2.4^2=5.76"
+              },
+              {
+                "id": "c-g-figure",
+                "kind": "figure",
+                "markdown": "The green step moves left and down along the curve. It does not jump to the minimum.",
+                "spokenText": "The green step moves left and down toward the minimum. It doesn't jump all the way to the minimum.",
+                "references": [],
+                "origin": "teaching",
+                "assetId": "gradient-curve"
+              },
+              {
+                "id": "c-update-map",
+                "kind": "diagram",
+                "title": "One step of gradient descent",
+                "markdown": "Each step reads the slope where you stand, scales it by the learning rate, and moves the opposite way. The new point becomes the next starting point.",
+                "spokenText": "Here is one step as a loop. Start from the current point. Measure the slope there. Multiply the slope by the learning rate to get the step. Subtract the step to reach the new point. Then repeat from that new point.",
+                "nodes": [
+                  {
+                    "id": "point",
+                    "label": "Current point"
+                  },
+                  {
+                    "id": "slope",
+                    "label": "Slope at that point"
+                  },
+                  {
+                    "id": "step",
+                    "label": "Step = learning rate × slope"
+                  },
+                  {
+                    "id": "new",
+                    "label": "New point"
+                  }
+                ],
+                "edges": [
+                  {
+                    "from": "point",
+                    "to": "slope",
+                    "label": "measure"
+                  },
+                  {
+                    "from": "slope",
+                    "to": "step",
+                    "label": "scale"
+                  },
+                  {
+                    "from": "step",
+                    "to": "new",
+                    "label": "subtract"
+                  },
+                  {
+                    "from": "new",
+                    "to": "point",
+                    "label": "repeat"
+                  }
+                ],
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-update-check-0",
+                "kind": "quiz",
+                "markdown": "You are at $x=2$ on $f(x)=x^2$ with learning rate $\\eta=0.25$. Where does one step take you?",
+                "spokenText": "You are at x equals two on x squared, with a learning rate of zero point two five. Where does one step take you? First option: to x equals one. Second option: to x equals three. Third option: to x equals zero. Fourth option: to x equals one point five.",
+                "options": [
+                  "To x = 1",
+                  "To x = 3",
+                  "To x = 0",
+                  "To x = 1.5"
+                ],
+                "answer": 0,
+                "explanation": "The slope at $2$ is $2\\times2=4$, so the step is $0.25\\times4=1$. Subtracting it gives $x=1$. Landing on $3$ would mean adding the step, which goes uphill.",
+                "explanationSpoken": "The slope at two is four, so the step is zero point two five times four, which is one. Subtracting it gives x equals one. Landing on three would mean adding the step, which goes uphill.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-update-takeaway",
+                "kind": "callout",
+                "title": "Key takeaway",
+                "markdown": "Gradient descent repeats one move: step against the slope, by an amount the learning rate controls.",
+                "spokenText": "Gradient descent repeats one move: step against the slope, by an amount the learning rate controls.",
+                "references": [],
+                "origin": "teaching"
+              }
+            ]
+          },
+          {
+            "id": "rate",
+            "title": "What if the step is too large?",
+            "blocks": [
+              {
+                "id": "c-rate-goal",
+                "kind": "callout",
+                "title": "What you will learn",
+                "markdown": "Predict whether a learning rate will converge, stall or overshoot on this curve, and explain why the answer does not carry over to other functions.",
+                "spokenText": "Predict whether a learning rate will converge, stall or overshoot on this curve, and explain why the answer does not carry over to other functions.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-g-factor",
+                "kind": "equation",
+                "markdown": "- On this curve each step multiplies $x$ by $1-2\\eta$\n- The size of that factor decides everything",
+                "spokenText": "For this quadratic, each step multiplies x by one minus twice the learning rate.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ],
+                "origin": "source",
+                "latex": "x_{t+1}=(1-2\\eta)x_t"
+              },
+              {
+                "id": "c-g-convergence",
+                "kind": "text",
+                "markdown": "- Converges when $|1-2\\eta|<1$, that is $0<\\eta<1$\n- $\\eta=0.5$: lands exactly on zero\n- $\\eta=1$: flips sign forever without shrinking",
+                "spokenText": "For this quadratic, a constant learning rate strictly between zero and one guarantees convergence from any starting point. At one half, the next point is exactly zero. At one, a nonzero starting point oscillates without shrinking.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ],
+                "origin": "source"
+              },
+              {
+                "id": "c-g-general",
+                "kind": "text",
+                "markdown": "- The interval belongs to $f(x)=x^2$ only\n- Other curvature needs other step sizes\n- A large step can leave the region where the slope is a good guide",
+                "spokenText": "That interval is specific to x squared. Other functions have different curvature and may need different step sizes. A large step can go beyond the region where the local slope is useful.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Learning rate"
+                  }
+                ],
+                "origin": "source"
+              },
+              {
+                "id": "c-rate-check-0",
+                "kind": "quiz",
+                "markdown": "On $f(x)=x^2$, starting from $x=3$ with $\\eta=1$, what happens?",
+                "spokenText": "On x squared, starting from x equals three with a learning rate of one, what happens? First option: the point jumps between three and minus three and never gets closer to zero. Second option: the point reaches zero in a single step. Third option: the point moves steadily toward zero. Fourth option: the point grows without limit.",
+                "options": [
+                  "The point jumps between 3 and −3 and never gets closer to zero",
+                  "The point reaches zero in a single step",
+                  "The point moves steadily toward zero",
+                  "The point grows without limit"
+                ],
+                "answer": 0,
+                "explanation": "With $\\eta=1$ the factor is $1-2=-1$, so each step only flips the sign. Reaching zero in one step is what $\\eta=0.5$ does, where the factor is $0$.",
+                "explanationSpoken": "With a learning rate of one, the factor is minus one, so each step only flips the sign. Reaching zero in one step is what a learning rate of one half does, because then the factor is zero.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-rate-takeaway",
+                "kind": "callout",
+                "title": "Key takeaway",
+                "markdown": "A step can be too large: past a limit set by the curve’s shape, each step overshoots as much as it gains, or more.",
+                "spokenText": "A step can be too large: past a limit set by the curve’s shape, each step overshoots as much as it gains, or more.",
+                "references": [],
+                "origin": "teaching"
+              }
+            ]
+          },
+          {
+            "id": "many-variables",
+            "title": "Extend the idea to many variables",
+            "blocks": [
+              {
+                "id": "c-many-variables-goal",
+                "kind": "callout",
+                "title": "What you will learn",
+                "markdown": "State what a gradient is for several parameters and what following it does and does not guarantee.",
+                "spokenText": "State what a gradient is for several parameters and what following it does and does not guarantee.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-g-vector",
+                "kind": "equation",
+                "markdown": "- The gradient is the vector of partial derivatives\n- Its negative points toward steepest **local** decrease\n- Same rule: move against it, scaled by $\\eta$",
+                "spokenText": "For a differentiable function of several parameters, the gradient collects partial derivatives into a vector. With Euclidean distance and a nonzero gradient, the negative gradient points toward steepest local decrease.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Several variables"
+                  }
+                ],
+                "origin": "source",
+                "latex": "\\boldsymbol{\\theta}_{t+1}=\\boldsymbol{\\theta}_t-\\eta\\nabla f(\\boldsymbol{\\theta}_t)"
+              },
+              {
+                "id": "c-g-caveat",
+                "kind": "text",
+                "markdown": "- No guarantee of a **global** minimum on nonconvex functions\n- Zero gradient: minimum, maximum, or saddle point\n- The quadratic shows the mechanism, not a guarantee",
+                "spokenText": "For a general nonconvex function, this rule does not guarantee a global minimum. A zero gradient can occur at a minimum, a maximum, or a saddle point. This example explains the mechanism, not a universal guarantee.",
+                "references": [
+                  {
+                    "sourceId": "original",
+                    "locator": "Several variables"
+                  }
+                ],
+                "origin": "source"
+              },
+              {
+                "id": "c-many-variables-check-0",
+                "kind": "quiz",
+                "markdown": "Gradient descent stops moving because the gradient is zero. What can you conclude?",
+                "spokenText": "Gradient descent stops moving because the gradient is zero. What can you conclude? First option: the point may be a minimum, a maximum or a saddle point. Second option: the point is the lowest value the function can take. Third option: the learning rate was too large.",
+                "options": [
+                  "The point may be a minimum, a maximum or a saddle point",
+                  "The point is the lowest value the function can take",
+                  "The learning rate was too large"
+                ],
+                "answer": 0,
+                "explanation": "A zero gradient only says the function is flat there to first order. On a nonconvex function that happens at maxima and saddle points too, so it does not certify a global minimum.",
+                "explanationSpoken": "A zero gradient only says the function is flat there, to first order. On a nonconvex function that also happens at maxima and saddle points, so it does not certify a global minimum.",
+                "references": [],
+                "origin": "teaching"
+              },
+              {
+                "id": "c-many-variables-takeaway",
+                "kind": "callout",
+                "title": "Key takeaway",
+                "markdown": "The negative gradient is the best local direction, not a promise about where you end up.",
+                "spokenText": "The negative gradient is the best local direction, not a promise about where you end up.",
+                "references": [],
+                "origin": "teaching"
+              }
+            ]
+          }
+        ]
       }
     },
     "sources": [

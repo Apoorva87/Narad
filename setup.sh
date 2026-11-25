@@ -37,5 +37,5 @@ npm run build
 echo
 echo "Narad is ready. Run: npm run dev"
 if [[ "$with_speech" == false ]]; then
-  echo "For local voices, run: ./setup.sh --with-speech"
+  echo "For local voices (Breeze TTS 2, about 7.6 GB), run: ./setup.sh --with-speech"
 fi

@@ -28,7 +28,7 @@ const journey = [
   {
     icon: Sparkles,
     title: 'Prepare the lesson',
-    text: 'Choose Codex or Claude and a familiarity level. The agent writes, reviews, and saves a quick summary, detailed walkthrough, and tutor dialogue.',
+    text: 'Choose Codex or Claude and a familiarity level. The agent writes, reviews, and saves a quick summary, detailed walkthrough, tutor dialogue, and a course with narrated key points, check questions and teaching diagrams.',
   },
   {
     icon: BookOpen,
@@ -91,7 +91,7 @@ export function HelpPage({ onBack }: { onBack: () => void }) {
               <Database size={20} /><div><strong>Local lesson data</strong><small>Sources, visuals, progress, settings, and tutor threads</small></div>
             </div>
             <div className="architecture-node architecture-speech">
-              <Volume2 size={20} /><div><strong>Local speech worker</strong><small>Qwen3-TTS creates short-lived audio chunks</small></div>
+              <Volume2 size={20} /><div><strong>Local speech worker</strong><small>Breeze TTS 2 or Qwen3-TTS creates short-lived audio chunks</small></div>
             </div>
           </div>
         </div>

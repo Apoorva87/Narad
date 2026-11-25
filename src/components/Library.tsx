@@ -3,6 +3,7 @@ import { Search, BookOpen, FilePlus2, FolderOpen, Pencil, Trash2, Check, X, Load
 import type { LessonSummary } from '../../shared/lesson';
 import { familiarityLabels } from '../../shared/lesson';
 import type { BundleSummary } from '../../shared/sources';
+import type { PreparationJob } from '../../shared/preparation';
 import { api } from '../lib/api';
 import { Modal } from './Modal';
 
@@ -14,7 +15,16 @@ function shortDate(iso: string) {
   return date.toLocaleDateString(undefined, date.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function Library({ lessons, bundles, onOpen, onBundle, onImport, onChanged, onSettings }: { lessons: LessonSummary[]; bundles: BundleSummary[]; onOpen: (id: string) => void; onBundle: (id: string) => void; onImport: () => void; onChanged: () => void; onSettings: () => void }) {
+/** What a saved source collection is waiting for, from its latest preparation run. */
+export function preparationNote(job: PreparationJob | undefined): { text: string; tone: '' | 'active' | 'needs-review' } {
+  if (!job || job.status === 'completed' || job.status === 'cancelled') return { text: 'Awaiting preparation', tone: '' };
+  if (job.status === 'running' || job.status === 'stopping') return { text: job.status === 'stopping' ? 'Stopping…' : job.total ? `Preparing · ${job.completed} of ${job.total} sections done` : 'Preparing · getting started', tone: 'active' };
+  if (job.status === 'queued') return { text: 'Queued' + (job.queuePosition ? ` · position ${job.queuePosition} of ${job.queueLength}` : ''), tone: 'active' };
+  const kept = job.completed ? ` · ${job.completed} of ${job.total} sections kept` : '';
+  return { text: (job.status === 'failed' ? 'Preparation needs attention' : job.status === 'stopped' ? 'Preparation stopped' : 'Preparation interrupted') + kept, tone: 'needs-review' };
+}
+
+export function Library({ lessons, bundles, jobs = [], onOpen, onBundle, onImport, onChanged, onSettings }: { lessons: LessonSummary[]; bundles: BundleSummary[]; jobs?: PreparationJob[]; onOpen: (id: string) => void; onBundle: (id: string) => void; onImport: () => void; onChanged: () => void; onSettings: () => void }) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
   const [renameError, setRenameError] = useState('');
@@ -40,6 +50,7 @@ export function Library({ lessons, bundles, onOpen, onBundle, onImport, onChange
     {filtered.length > 0 && <ul className="library-list" aria-label="Library items, newest first">
       {filtered.map(item => {
         const lesson = item.kind === 'lesson' ? item.lesson : undefined; const bundle = item.kind === 'sources' ? item.bundle : undefined; const broken = lesson?.broken ?? bundle?.broken;
+        const note = bundle ? preparationNote(jobs.find(job => job.bundleId === bundle.id)) : undefined;
         const detail = lesson
           ? [lesson.isSample ? 'Sample lesson' : 'Lesson', familiarityLabels[lesson.familiarity], lesson.availableModes.length + (lesson.availableModes.length === 1 ? ' mode' : ' modes'), lesson.sourceCount + (lesson.sourceCount === 1 ? ' source' : ' sources')]
           : ['Sources', bundle!.sourceCount + (bundle!.sourceCount === 1 ? ' source' : ' sources'), bundle!.visualCount + ' visuals'];
@@ -56,7 +67,7 @@ export function Library({ lessons, bundles, onOpen, onBundle, onImport, onChange
                 <span className="row-icon">{lesson ? <BookOpen size={18} /> : <FolderOpen size={18} />}</span>
                 <span className="row-text"><strong>{item.title}</strong>
                   {broken ? <span className="row-error" role="note">Cannot open: {broken}</span> : lesson && <span className="row-description">{lesson.description}</span>}
-                  <small>{detail.join(' · ')}<span className="row-date-inline"> · {shortDate(item.createdAt)}</span>{bundle && !broken && <em className={bundle.warningCount ? 'needs-review' : ''}>{bundle.warningCount ? bundle.warningCount + ' capture issues to review' : 'Awaiting preparation'}</em>}</small></span>
+                  <small>{detail.join(' · ')}<span className="row-date-inline"> · {shortDate(item.createdAt)}</span>{bundle && !broken && <em className={bundle.warningCount && note!.tone !== 'active' ? 'needs-review' : note!.tone}>{note!.tone === 'active' && <LoaderCircle size={11} className="spin" />}{bundle.warningCount && note!.tone !== 'active' ? bundle.warningCount + ' capture issues to review' : note!.text}</em>}</small></span>
                 <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{shortDate(item.createdAt)}</time>
               </button>}
           {editing?.id !== item.id && <div className="row-actions">

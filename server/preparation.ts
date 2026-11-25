@@ -51,7 +51,7 @@ const QUEUE_INTERRUPTED = 'Not started — the server restarted while it was que
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 3000);
 const stageFor: Record<PreparationJob['status'], string> = {
-  queued: 'Queued', running: 'Preparing', stopping: 'Stopping agent…', completed: 'Lesson ready · all three modes saved', failed: 'Preparation needs attention',
+  queued: 'Queued', running: 'Preparing', stopping: 'Stopping agent…', completed: 'Lesson ready', failed: 'Preparation needs attention',
   stopped: 'Stopped · finished sections kept', cancelled: 'Stopped', interrupted: 'Interrupted when the server stopped · finished sections kept',
 };
 const levelKey: Record<Familiarity, 'levelFoundational' | 'levelSomeBackground' | 'levelAdvanced'> = { foundational: 'levelFoundational', 'some-background': 'levelSomeBackground', advanced: 'levelAdvanced' };
@@ -59,10 +59,13 @@ const levelKey: Record<Familiarity, 'levelFoundational' | 'levelSomeBackground' 
 function promptKit(settings: Settings, level: Familiarity) {
   const p = settings.prompts;
   const principles = renderPrompt(p.principles, { level, levelGuidance: p[levelKey[level]] });
-  const shared = { principles, walkthroughGuidance: p.walkthroughGuidance, dialogueGuidance: p.dialogueGuidance, visualGuidance: p.visualGuidance, maxLinks: String(settings.research.maxLinks) };
+  const shared = { principles, walkthroughGuidance: p.walkthroughGuidance, dialogueGuidance: p.dialogueGuidance, visualGuidance: p.visualGuidance, courseGuidance: p.courseGuidance, maxLinks: String(settings.research.maxLinks) };
+  // A section or review prompt customised before the course existed has no {{courseGuidance}} slot; the agent still needs the guidance.
+  const template = (key: 'research' | 'section' | 'revision' | 'review' | 'summary') =>
+    (key === 'section' || key === 'review') && !/\{\{\s*courseGuidance\s*\}\}/.test(p[key]) ? '{{courseGuidance}}\n' + p[key] : p[key];
   // Every data slot is learner- or source-controlled: each is encoded as one untrusted JSON value so it cannot open a new prompt boundary.
   return (key: 'research' | 'section' | 'revision' | 'review' | 'summary', values: Record<string, unknown>) =>
-    renderPrompt(p[key], { ...shared, ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, untrustedData(name, value)])) });
+    renderPrompt(template(key), { ...shared, ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, untrustedData(name, value)])) });
 }
 function progressIssue(issues:string[]):string{
   const text=issues[0]?.replace(/\s+/g,' ').trim()??'Improving the draft.';

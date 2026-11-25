@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { z } from 'zod';
 import { compileTeachingLesson, splitSourceSections, type AuthoredSection } from '../server/lesson-preparation';
 import { parseLesson } from '../shared/lesson';
+import { numericTokens } from '../server/generation-content';
 import type { SourceBundle } from '../shared/sources';
 
 const manifestPath = process.argv[2];
@@ -22,10 +23,7 @@ const summary = JSON.parse(await readFile(resolve(root, manifest.summaryFile), '
 const lesson = compileTeachingLesson({ ...manifest, bundle, authored, summary });
 const source = bundle.sources.find(source => source.kind === 'article')!;
 
-function numbers(text: string): Set<string> {
-  const cleaned = text.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/https?:\/\/\S+/g, '').replace(/\\?\[\d+\\?\]/g, '').replace(/(\d),(?=\d{3})/g, '$1').replace(/^\s*`?\d+\.\s*/gm, '');
-  return new Set(cleaned.match(/(?<![A-Za-z_\d])\d+(?:\.\d+)?/g) ?? []);
-}
+const numbers = numericTokens;
 const missingNumbers: { unit: string; mode: string; values: string[] }[] = [];
 for (const section of splitSourceSections(source.markdown)) for (const unit of section.units) {
   if (unit.kind !== 'text') continue; // Tables and visual originals are retained verbatim.
@@ -56,5 +54,5 @@ if (missingNumbers.length) throw new Error('Review numerical coverage gaps befor
 if (process.argv.includes('--publish')) {
   const published = await fetch(base + '/api/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lesson) });
   if (!published.ok) throw new Error('Lesson publication failed: ' + await published.text());
-  console.log('Published ' + lesson.id + ' with all three learning modes.');
+  console.log('Published ' + lesson.id + '.');
 } else console.log('Prepared lesson.json. Run with --publish after reviewing it.');

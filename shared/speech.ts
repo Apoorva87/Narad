@@ -3,10 +3,21 @@ import { modes, type LessonBlock } from './lesson';
 
 export const voices = ['Ryan', 'Aiden', 'Vivian', 'Serena'] as const;
 export type Voice = typeof voices[number];
+/** Local voice models. Voice names are shared, so a lesson keeps its narrator, host and tutor when the model changes. */
+export const speechEngines = ['breeze', 'qwen'] as const;
+export type SpeechEngineId = typeof speechEngines[number];
+export const speechEngineLabels: Record<SpeechEngineId, string> = { breeze: 'Breeze TTS 2 (most expressive)', qwen: 'Qwen3-TTS (faster, smaller)' };
 export const speechRequestSchema = z.object({
   lessonId: z.string().min(1).max(100), mode: z.enum(modes), blockId: z.string().min(1).max(100),
   chunk: z.number().int().min(0), voice: z.enum(voices),
+  /** A check question's explanation, spoken after the learner answers. Absent for the passage itself. */
+  part: z.literal('explanation').optional(),
 });
+/** The text a narration request speaks: the passage, or a check question's explanation. */
+export function spokenPart(block: LessonBlock, part?: 'explanation'): string | undefined {
+  if (!part) return block.spokenText;
+  return block.kind === 'quiz' ? block.explanationSpoken : undefined;
+}
 export type SpeechRequest = z.infer<typeof speechRequestSchema>;
 /** Temporary browser audio; its owner must release the object URL after use. */
 export type SpeechAudio = { url: string; release(): void };

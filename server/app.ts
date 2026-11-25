@@ -215,7 +215,8 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
     res.json(store.getProgress(slug));
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
-  app.use(express.static(resolve('dist')));
+  // Vite names built scripts, styles and fonts by content hash, so a browser may keep them for good; everything else is revalidated.
+  app.use(express.static(resolve('dist'), { setHeaders: (res, path) => { if (/[\\/]assets[\\/][^\\/]+-[A-Za-z0-9_-]{8}\.(?:js|css|woff2?)$/.test(path)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
   const onError: ErrorRequestHandler = (error, _req, res, _next) => {
     if (error instanceof ZodError) {
       res.status(400).json({ error: 'Check the supplied content.', details: error.issues.map(issue => (issue.path.join('.') || 'Content') + ': ' + issue.message).slice(0, 8) });
