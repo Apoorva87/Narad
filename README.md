@@ -4,6 +4,10 @@
 
 A local learning workspace for faithful explanations, illustrated walkthroughs, and interactive spoken tutoring.
 
+**[See what Narad does, with screenshots](https://apoorva87.github.io/Narad/)**
+
+That introduction page lives in `site/` and is published by GitHub Pages whenever `site/` changes on `main`. `scripts/site-screenshots.mjs` retakes its screenshots from a Narad that holds only the bundled samples.
+
 ## Current checkpoint: Part 4 of 4 — contextual tutor
 
 Implemented:
