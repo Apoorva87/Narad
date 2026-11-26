@@ -299,19 +299,6 @@ Browser tests use installed Google Chrome, start isolated servers on ports 4319/
 
 The KaTeX dependency override aligns transitive copies with the patched direct dependency. The build emits a non-blocking bundle-size advisory because math/Markdown rendering is included in the initial bundle. Code splitting can be considered when the app grows.
 
-## Product decisions and next steps
-
-A plan for publishing Narad as a free public website (visitors bring their own model key; voice runs in the browser) is in [docs/public-website-plan.md](docs/public-website-plan.md). None of it is built.
-
-See [the PRD](docs/superpowers/specs/2026-10-19-narad-design.md), [Part 1 plan](docs/superpowers/plans/2026-10-19-narad-part-1.md), and [progress](docs/progress.md).
-
-1. **Library and reader** — completed.
-2. **Research and generation** — source capture, automatic preparation with Codex/Claude, per-section review, and minimal session controls are available. PDF ingestion and supplementary generated diagrams remain unfinished.
-3. **Local narration** — implemented with Breeze TTS 2 and Qwen3-TTS 1.7B CustomVoice through MLX Audio; voices approved, on-demand playback without saved article audio.
-4. **Interactive tutor** — contextual typed/dictated questions, researched answers, illustrated detours, persistent threads, and spoken replies are implemented. Familiarity adaptations remain next.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for component boundaries, persistence, trust rules, and playback ownership.
-
 ## Ask the contextual tutor
 
 In presentation mode, the **Ask tutor** button (or `A`) opens the same conversation in a panel over the slide: a bottom sheet on phones, a side panel on desktop. The panel stays on the passage it was opened on while narration moves on; **Back to current passage** switches it. Swiping inside the panel never changes the slide.
@@ -363,3 +350,7 @@ The skills use the command-line helper, which you can also run yourself (add `--
 `input.json` uses the source input shape `{ "title": "...", "text": "ideas or links", "images": [] }`. `NARAD_API_URL` overrides the default local API. The server accepts its own HTTP origin and the default local Vite origin on port 5178; set `NARAD_WEB_ORIGIN` to one exact HTTPS reverse-proxy origin, or to a loopback HTTP origin when changing development ports.
 
 Provider integration references: [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [Claude programmatic use](https://code.claude.com/docs/en/headless). Claude's CLI schema validator uses JSON Schema Draft 7; both provider requests use that dialect.
+
+## Licence
+
+Narad's code is released under the [MIT licence](LICENSE). The voice models and fonts it uses are not covered by that licence and keep their own terms. In particular, the default voice, Breeze TTS 2, may be used for personal and research purposes only, including the audio it produces; Qwen3-TTS (Apache 2.0) has no such restriction. Articles and images that Narad captures remain the property of their owners and keep their credits.

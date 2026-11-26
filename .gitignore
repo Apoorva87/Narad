@@ -10,3 +10,6 @@ artifacts/
 .playwright-mcp/
 speech/.venv/
 __pycache__/
+
+# Planning notes, kept on this machine only
+docs/
