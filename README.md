@@ -8,9 +8,8 @@ A local learning workspace for faithful explanations, illustrated walkthroughs, 
 
 That introduction page lives in `site/` and is published by GitHub Pages whenever `site/` changes on `main`. `scripts/site-screenshots.mjs` retakes its screenshots from a Narad that holds only the bundled samples.
 
-## Current checkpoint: Part 4 of 4 — contextual tutor
+## What Narad can do
 
-Implemented:
 - Veena-inspired Narad logo, drawing on Narada’s musical association.
 - Add a lesson from text ideas, multiple article links, uploaded/dropped/pasted images, or a mixture.
 - Persistent source collections with ordered article previews, captured visuals, missing-content warnings, and retry/refresh.
@@ -27,6 +26,7 @@ Implemented:
 - Prepare all four modes using installed Codex or Claude, with per-section review and bounded correction.
 - App-owned live session count, progress, stop/retry, retained drafts and job history.
 - Topic research, captured article collections, and source-image explanations through the same preparation flow.
+- **Steer the research** for a topic-only lesson. Preview an outline, skip topics you already know, and choose where Narad should go deeper. [How to steer a lesson](#steer-the-research)
 - On-demand local narration with Breeze TTS 2 (default) or Qwen3-TTS, switchable in Settings, separate narrator/host/tutor voices, meaning-aware pacing around the selected speed, pause/resume/stop, and automatic passage highlighting and scrolling. Article audio is never saved to disk.
 - Presentation mode: full-screen narration that holds the latest figure on screen until the next one, with an optional transcript. Swipe and tap gestures on touch screens; lock-screen and headphone controls via Media Session. The lock screen shows the current slide as artwork (converted to PNG, which iOS requires) and the sentence being spoken as the title.
 - Keyboard shortcuts in the reader (press `?`): Space/K play-pause, ←/→ or J/L passages, Shift+←/→ sections, 1–4 modes, −/+ speed, P present, T transcript, A ask the tutor while presenting.
@@ -319,15 +319,24 @@ Add `--publish` to save a new lesson after reviewing its content and coverage. E
 
 ## Prepare a lesson with an agent
 
-Save a source collection, then choose **Codex** or **Claude** and **Prepare lesson**. Preparation continues while you read elsewhere. The **Agents** button shows real app-owned CLI sessions and recent jobs; it does not enumerate or stop unrelated terminal sessions. Its count is the number of lessons preparing plus those waiting in the queue. Completed jobs close their child processes automatically.
+Save a source collection, then choose **Codex** or **Claude** and **Prepare lesson**. Preparation continues while you read elsewhere. The **Agents** button shows Narad’s CLI sessions and recent jobs. Its count includes lessons preparing, lessons in the queue, and outlines waiting for your choices. Completed jobs close their child processes automatically.
 
 Install/sign in with the provider's CLI before starting Narad. Availability means the executable was found, not that account authentication has been verified. `NARAD_CODEX_BIN` and `NARAD_CLAUDE_BIN` can specify executable paths. The app uses the CLI's default model with project customizations disabled for the preparation subprocess. It never uses permission-bypass flags or interpolates source content into shell commands. Built-in file/network tools are restricted to the preparation task; source documents are treated as untrusted data.
 
-For a topic-only input, the agent searches for up to four source pages, which Narad captures before writing. Images are passed to the model as visual inputs. Blocking capture warnings stop preparation until a refresh fixes them; informational ones become "Not captured" notes (see Capture above). Sections are split into bounded groups without dropping source units; an individual paragraph/table over 24,000 characters requires splitting the source. Display explanations, spoken scripts, visual notes, individual source summaries and synthesis are saved. A separate model call reviews each teaching group against its source and images; one correction attempt is allowed. These checks reduce omissions but do not certify truth or perfect visual interpretation.
+For a topic-only input with steering off, the agent searches for source pages (up to four by default), which Narad captures before writing. Images are passed to the model as visual inputs. Blocking capture warnings stop preparation until a refresh fixes them; informational ones become "Not captured" notes (see Capture above). Sections are split into bounded groups without dropping source units; an individual paragraph/table over 24,000 characters requires splitting the source. Display explanations, spoken scripts, visual notes, individual source summaries and synthesis are saved. A separate model call reviews each teaching group against its source and images; one correction attempt is allowed. These checks reduce omissions but do not certify truth or perfect visual interpretation.
 
 Progress lives in the item's `preparation/` folder (see above): each approved section is saved as its own file, and every agent call leaves its prompt, result and log under `calls/`. Nothing resumes by itself. A run that was stopped, failed or interrupted by a server restart (it is marked honestly after restart) shows **Continue**, which reuses every finished section whose source text is unchanged and writes only the rest, using your current settings. **Start over** moves finished sections into `runs/` and starts fresh; changing the learner level also starts over, after asking. A single failed agent call is retried once before the section is marked failed. Codex writes independent sections in parallel subagents (Settings → Preparation → **Subagents per batch**, 1–4). Separately, **Lessons at once** (1–5, default 1) sets how many library items prepare at the same time; each runs its own sections in parallel on your agent account, so lessons × sections at once can hit rate limits. Starting another lesson while every slot is busy queues it (first in, first out): the panel shows **Queued · position N of M** with **Remove from queue**, and the next queued lesson starts automatically whenever a run ends for any reason. Raising the setting starts waiting lessons immediately; lowering it never stops running ones. Removing a queued lesson marks it stopped (a queued new version of a published lesson goes back to its published state); deleting or renaming a queued item takes it out of the queue only for that action (a failed rename or delete leaves it queued in its place). The queue is kept in memory: after a server restart, queued lessons show as interrupted ("Not started — the server restarted while it was queued") and wait for **Continue**, like any interrupted run. The panel lists each section's state and duration, and shows tokens used by the run (input, output, cached, and cost when the agent reports it; Codex reports tokens only), summed over every call including retries whose CLI output could be read (a call that crashed before reporting usage is not counted). Graceful shutdown stops every active job and waits for them; the CLI helper also watches the server IPC connection and terminates its own process group if the server disappears. A CLI call is bounded to 12 minutes and 12 MB of captured output. Long sources involve many calls and can take substantial time.
 
 Preparing a new version archives the earlier `lesson.json` under `preparation/runs/` and publishes the new one in place.
+
+### Steer the research
+
+1. Save a topic as plain text, without article links or images. In its preparation panel, turn on **Steer the research**, then choose **Prepare lesson**. Narad searches for an outline and pauses for your choices.
+2. Pick **Deeper**, **Summary**, or **Skip** for each suggested topic. For a lesson on gradient descent, for example, you might go deeper on learning rates, keep the gradient definition brief, and skip material you already know. Choose **Break into sub-topics** for finer control. At the deepest level, choose **Summary** or **Skip**.
+3. Optionally add a note to a topic or set an **Overall focus**, such as “Show one update with actual numbers.” The outline saves your edits. You can leave and return through **Agents → Choose topics**, even after restarting Narad. A waiting outline frees its preparation slot for another lesson.
+4. Choose **Build lesson** to research your selections. Your depth choices and notes also guide the writing and review. To use the original top-level outline with every topic at Summary and discard customizations, choose **Keep it simple (all Summary)**.
+
+The outline estimates how many source pages Narad will read before you commit. By default, it budgets one link per Summary topic and two per Deeper topic, up to ten links for the lesson. You can change these limits in Settings.
 
 ### Agent skill for Codex and Claude Code
 
