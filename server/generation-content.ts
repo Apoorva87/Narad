@@ -26,7 +26,8 @@ export const summarySchema = z.object({ sections: z.array(z.object({ title: z.st
 });
 export type Summary = z.infer<typeof summarySchema>['sections'];
 export const reviewSchema = z.object({ approved: z.boolean(), issues: z.array(z.string()) });
-export const researchSchema = z.object({ links: z.array(z.string().regex(/^https?:\/\/[^\s]+$/)).min(1).max(4), rationale: z.string() });
+/** The caller caps `links` at the "Links found by topic research" setting. */
+export const researchSchema = z.object({ links: z.array(z.string().regex(/^https?:\/\/[^\s]+$/)).min(1), rationale: z.string() });
 export type ChunkLimits = { chunkChars: number; chunkUnits: number };
 export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { chunkChars: 7000, chunkUnits: 8 }): TeachingTask[] {
   if (bundle.status !== 'captured' || bundle.sources.some(s=>isBlocking(s) || s.assets.some(a=>!a.src))) throw new Error('Finish source capture and resolve its warnings before preparing a lesson.');
@@ -50,9 +51,14 @@ export function buildTeachingPlan(bundle: SourceBundle, limits: ChunkLimits = { 
   }
   return tasks;
 }
-/** Identifies a section's source: SHA-256 of its units' Markdown joined with blank lines, plus its sorted asset IDs. */
-export function sectionHash(task: TeachingTask): string {
-  return createHash('sha256').update(task.section.units.map(u=>u.markdown).join('\n\n')).update('\0').update(task.assets.map(a=>a.id).sort().join('\n')).digest('hex');
+/**
+ * Identifies a section's source: SHA-256 of its units' Markdown joined with blank lines, plus its sorted asset IDs. A steered
+ * lesson adds the topic's coverage and note, so a section written for other choices is not reused; without `steer` the hash is unchanged.
+ */
+export function sectionHash(task: TeachingTask, steer?: { coverage: string; note: string | null }): string {
+  const hash = createHash('sha256').update(task.section.units.map(u=>u.markdown).join('\n\n')).update('\0').update(task.assets.map(a=>a.id).sort().join('\n'));
+  if (steer) hash.update('\0steer\0').update(JSON.stringify([steer.coverage, steer.note ?? '']));
+  return hash.digest('hex');
 }
 /** Numbers in a text, for the coverage check. Thousands separators are removed in every form an author may write them: `1,048,576`, LaTeX `1{,}048{,}576` and `1\,048\,576`. */
 export function numericTokens(text:string):Set<string> {

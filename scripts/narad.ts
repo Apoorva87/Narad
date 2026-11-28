@@ -35,7 +35,7 @@ const tokens = (n?: number) => n === undefined ? '' : n >= 1e6 ? (n / 1e6).toFix
 type Job = { slug: string; title: string; status: string; queuePosition?: number; queueLength?: number; stage: string; completed: number; total: number; provider: string; folder: string; lessonId?: string; error?: string;
   sections?: { task: string; title: string; state: string; error?: string }[]; usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number; costUsd?: number } };
 function describe(job: Job, detailed: boolean) {
-  const state = job.status === 'queued' && job.queuePosition ? `queued (position ${job.queuePosition} of ${job.queueLength ?? job.queuePosition})` : job.status;
+  const state = job.status === 'queued' && job.queuePosition ? `queued (position ${job.queuePosition} of ${job.queueLength ?? job.queuePosition})` : job.status === 'awaiting-input' ? 'waiting for topic choices in the app' : job.status;
   const lines = [`${job.title}  [${job.slug}]`, `  ${state} · ${job.completed}/${job.total} sections · ${job.provider} · ${job.stage}`];
   if (job.usage) lines.push(`  tokens: ${tokens(job.usage.inputTokens)} in · ${tokens(job.usage.outputTokens)} out${job.usage.cachedTokens ? ` (cached ${tokens(job.usage.cachedTokens)})` : ''}${job.usage.costUsd !== undefined ? ` · $${job.usage.costUsd.toFixed(2)}` : ''}`);
   if (job.error) lines.push('  error: ' + job.error);
@@ -67,7 +67,8 @@ switch (command) {
     const already = before && job.status === before.status;
     const headline = already ? (job.status === 'queued' ? `Already queued (position ${job.queuePosition ?? '?'}).` : 'Already running.')
       : job.status === 'queued' ? `Queued (position ${job.queuePosition ?? '?'}). It starts automatically when a slot frees up.`
-      : job.status === 'running' || job.status === 'stopping' ? `Preparation ${flag('--restart') ? 'restarted' : 'started (finished sections are reused)'}.` : `Preparation is ${job.status}.`;
+      : job.status === 'running' || job.status === 'stopping' ? `Preparation ${flag('--restart') ? 'restarted' : 'started (finished sections are reused)'}.`
+      : job.status === 'awaiting-input' ? 'Waiting for topic choices in the app. Open the lesson there to pick topics; --restart draws a new outline.' : `Preparation is ${job.status}.`;
     console.log(flag('--json') ? JSON.stringify(job, null, 2) : headline + '\n' + describe(job, false));
     break;
   }
@@ -83,7 +84,7 @@ switch (command) {
   case 'stop': {
     if (!target) fail('Usage: stop <slug>');
     const job = await call('/api/preparation/' + encodeURIComponent(target) + '/stop', { method: 'POST' });
-    const headline = job.status === 'stopping' ? 'Stopping. Finished sections are kept.' : job.status === 'stopped' || job.status === 'completed' ? 'Not running; removed from the queue if it was waiting. Finished sections are kept.' : 'Preparation is ' + job.status + '.';
+    const headline = job.status === 'stopping' ? 'Stopping. Finished sections are kept.' : job.status === 'awaiting-input' ? 'Back to waiting for topic choices in the app.' : job.status === 'stopped' || job.status === 'completed' ? 'Not running; removed from the queue if it was waiting. Finished sections are kept.' : 'Preparation is ' + job.status + '.';
     console.log(flag('--json') ? JSON.stringify(job, null, 2) : headline + '\n' + describe(job, false));
     break;
   }

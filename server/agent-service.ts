@@ -6,7 +6,7 @@ import { z, ZodError } from 'zod';
 import { cliRunner, type AgentRequest, type AgentRunner } from './agent-runner';
 
 const requestSchema=z.object({
-  provider:z.enum(['codex','claude']),kind:z.enum(['author','review','summary','research','tutor']),
+  provider:z.enum(['codex','claude']),kind:z.enum(['author','review','summary','research','outline','tutor']),
   prompt:z.string().min(1).max(8_000_000),schema:z.record(z.string(),z.unknown()),cwd:z.string().min(1).max(1000),
   name:z.string().regex(/^[a-zA-Z0-9._-]+$/).max(180),images:z.array(z.string().min(1).max(1200)).max(24),
   model:z.string().max(200).optional(),timeoutMs:z.number().int().min(1_000).max(60*60_000).optional(),research:z.boolean().optional(),

@@ -19,6 +19,7 @@ function shortDate(iso: string) {
 export function preparationNote(job: PreparationJob | undefined): { text: string; tone: '' | 'active' | 'needs-review' } {
   if (!job || job.status === 'completed' || job.status === 'cancelled') return { text: 'Awaiting preparation', tone: '' };
   if (job.status === 'running' || job.status === 'stopping') return { text: job.status === 'stopping' ? 'Stopping…' : job.total ? `Preparing · ${job.completed} of ${job.total} sections done` : 'Preparing · getting started', tone: 'active' };
+  if (job.status === 'awaiting-input') return { text: 'Choose topics to continue', tone: 'needs-review' };
   if (job.status === 'queued') return { text: 'Queued' + (job.queuePosition ? ` · position ${job.queuePosition} of ${job.queueLength}` : ''), tone: 'active' };
   const kept = job.completed ? ` · ${job.completed} of ${job.total} sections kept` : '';
   return { text: (job.status === 'failed' ? 'Preparation needs attention' : job.status === 'stopped' ? 'Preparation stopped' : 'Preparation interrupted') + kept, tone: 'needs-review' };

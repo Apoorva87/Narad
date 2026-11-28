@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultSettings, renderPrompt, resolveSettings, settingsOverrides, settingsSchema } from '../shared/settings';
 import { LessonStore } from '../server/store';
+import { researchSchema } from '../server/generation-content';
 
 describe('settings', () => {
   it('ships valid defaults and fills only known slots', () => {
@@ -24,6 +25,37 @@ describe('settings', () => {
     expect(settingsSchema.safeParse(unknown).error?.issues[0].message).toMatch(/unknown slot \{\{sumary\}\}/);
     const tooMany = structuredClone(defaultSettings); tooMany.research.maxLinks = 10;
     expect(settingsSchema.safeParse(tooMany).success).toBe(false);
+  });
+  it('adds steered research limits with defaults that old saved settings pick up', () => {
+    expect(defaultSettings.research).toEqual({ maxLinks: 4, summaryLinks: 1, deepLinks: 2, steeredMaxLinks: 10 });
+    expect(resolveSettings({ research: { maxLinks: 3 }, capture: { maxLinks: 5 } }).research).toEqual({ maxLinks: 3, summaryLinks: 1, deepLinks: 2, steeredMaxLinks: 10 });
+    // The steered limit is independent of the link limit for sources you add yourself.
+    const independent = resolveSettings({ research: { steeredMaxLinks: 30 }, capture: { maxLinks: 4 } });
+    expect(independent.research.steeredMaxLinks).toBe(30); expect(independent.capture.maxLinks).toBe(4);
+    for (const [key, bad] of [['summaryLinks', 0], ['summaryLinks', 3], ['deepLinks', 5], ['steeredMaxLinks', 1], ['steeredMaxLinks', 31]] as const) { const s = structuredClone(defaultSettings); s.research[key] = bad; expect(settingsSchema.safeParse(s).success, key + ' ' + bad).toBe(false); }
+    expect(defaultSettings.prompts.outline).toMatch(/\{\{request\}\}[\s\S]*\{\{parent\}\}/); expect(defaultSettings.prompts.steeredResearch).toMatch(/\{\{request\}\}[\s\S]*\{\{topics\}\}/);
+    const missing = structuredClone(defaultSettings); missing.prompts.outline = 'Outline {{request}}';
+    expect(settingsSchema.safeParse(missing).error?.issues[0].message).toMatch(/\{\{parent\}\}/);
+  });
+  it('adds the steering guidance as slots that an unsteered lesson and an older saved prompt both tolerate', () => {
+    const p = defaultSettings.prompts;
+    expect(p.section).toContain('{{courseGuidance}}\n{{steerGuidance}}\n'); expect(p.review).toContain('{{courseGuidance}}\n{{steerGuidance}}\n');
+    expect(p.steerGuidance).toMatch(/coverage is "summary"[\s\S]*still states its values/); expect(p.steerGuidance).not.toMatch(/\{\{/);
+    expect(p.steerSummary).toMatch(/one section per source[\s\S]*\{\{outline\}\}/); expect(p.summary).not.toContain('outline');
+    expect(p.outline).not.toContain('{{principles}}'); expect(p.steeredResearch).not.toContain('{{principles}}'); expect(p.outline).toContain('{{level}}');
+    // Prompts saved before these changes stay valid.
+    const older = structuredClone(defaultSettings); older.prompts.outline = '{{principles}} Outline {{request}} {{parent}}'; older.prompts.section = '{{principles}} Write {{input}}'; older.prompts.review = 'Review {{source}} {{draft}}';
+    expect(settingsSchema.safeParse(older).success).toBe(true);
+    const missing = structuredClone(defaultSettings); missing.prompts.steerSummary = 'Follow the topics.';
+    expect(settingsSchema.safeParse(missing).error?.issues[0].message).toMatch(/\{\{outline\}\}/);
+  });
+  it('lets topic research return as many links as its setting allows, up to the capture limit', () => {
+    const eight = structuredClone(defaultSettings); eight.research.maxLinks = 8;
+    expect(settingsSchema.safeParse(eight).success).toBe(true);
+    const links = Array.from({ length: 8 }, (_, n) => 'https://example.com/' + n);
+    expect(researchSchema.parse({ links, rationale: '' }).links).toHaveLength(8);
+    const capped = researchSchema.extend({ links: researchSchema.shape.links.max(8) });
+    expect(capped.safeParse({ links, rationale: '' }).success).toBe(true); expect(capped.safeParse({ links: [...links, 'https://example.com/9'], rationale: '' }).success).toBe(false);
   });
   it('stores only changed values and ignores stale saved keys', () => {
     const changed = structuredClone(defaultSettings); changed.voice.host = 'Vivian';

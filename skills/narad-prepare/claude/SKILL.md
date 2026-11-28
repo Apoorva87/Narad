@@ -21,6 +21,7 @@ The API defaults to http://127.0.0.1:4318 (`NARAD_API_URL` overrides it). If `no
    `node --import tsx scripts/narad.ts prepare <slug> claude`
    If every preparation slot is busy (Settings → Preparation → Lessons at once), Narad queues the item automatically and prints `Queued (position N)`; it starts on its own when a slot frees up. Tell the user the queue position. Never stop someone else's run to make room.
 4. Preparation runs in the background inside Narad and can take an hour or more for a long article. Check `node --import tsx scripts/narad.ts status <slug>` occasionally (minutes apart, not in a tight loop) or tell the user how to check. Only status `completed` means the lesson was published; report `failed`, `stopped` or `interrupted` honestly, including the error.
+   If `status` shows `waiting for topic choices in the app`, the user turned on “Steer the research” there: nothing is running, and the lesson continues only after they pick topics in the app (tell them; do not restart it unless they ask).
 5. Share the reader link (`node --import tsx scripts/narad.ts link <slug>`) and the folder path from `status`, where the sources, media, CREDITS.md, lesson.json and every agent prompt/result are saved.
 
 ## Continue, start over, stop

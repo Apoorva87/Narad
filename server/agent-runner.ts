@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import type { Provider, PreparationState, AgentUsage } from '../shared/preparation';
 import { hasFixedPromptPolicy } from './prompt-security';
 export type { AgentUsage };
-export type AgentRequest = { provider:Provider; kind:'author'|'review'|'summary'|'research'|'tutor'; prompt:string; schema:Record<string,unknown>; cwd:string; name:string; images:string[]; model?:string; timeoutMs?:number; research?:boolean; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
+export type AgentRequest = { provider:Provider; kind:'author'|'review'|'summary'|'research'|'outline'|'tutor'; prompt:string; schema:Record<string,unknown>; cwd:string; name:string; images:string[]; model?:string; timeoutMs?:number; research?:boolean; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
+/** Web search is on for topic research and outlines, and wherever a request asks for it. */
+export const usesWebSearch=(request:Pick<AgentRequest,'kind'|'research'>)=>request.research??(request.kind==='research'||request.kind==='outline');
 export type AgentRunner = {run:(request:AgentRequest,signal:AbortSignal,onSession?:(pid:number|null)=>void,onUsage?:(usage:AgentUsage)=>void)=>Promise<unknown>; available:()=>PreparationState['providers']};
 const count=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>=0?value:0;
 /** Usage from a Claude `--output-format json` envelope; undefined when it carries none. Never throws. */
@@ -82,7 +84,7 @@ export const cliRunner:AgentRunner={
     await rm(outputPath,{force:true});
     const eventsPath=join(request.cwd,request.name+'.events.log');const log=openSync(eventsPath,'w');
     let result:{stdout:string;stderr:string};
-    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:request.research??request.kind==='research',model:request.model,multiAgent:request.multiAgent,reasoningEffort:request.reasoningEffort}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); }
+    try { result=await executeProcess({command,args:providerArgs(request.provider,{schemaPath,outputPath,schema:request.schema,images:request.images,research:usesWebSearch(request),model:request.model,multiAgent:request.multiAgent,reasoningEffort:request.reasoningEffort}),cwd:request.cwd,input:request.prompt,signal,timeoutMs:request.timeoutMs??12*60_000,onSession,onOutput:text=>appendFileSync(log,text)}); }
     catch(error) {
       // Codex can panic while shutting down (its file watcher) after it has written a complete answer; keep that answer.
       // The caller still validates it against the schema, so a truncated or wrong file is retried as before.

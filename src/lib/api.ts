@@ -1,4 +1,4 @@
-import type { PreparationState, PreparationJob, PrepareAction, Provider } from '../../shared/preparation';
+import type { PreparationState, PreparationJob, PrepareAction, Provider, SteerPatch, SteeringPlan } from '../../shared/preparation';
 import type { SpeechRequest, SpeechAudio, SpeechStatus } from '../../shared/speech';
 import type { Familiarity, Lesson, LessonSummary, Mode, Progress } from '../../shared/lesson';
 import type { SourceInput, SourceBundle, BundleSummary } from '../../shared/sources';
@@ -36,8 +36,12 @@ export const api = {
   settings: () => request<SettingsResponse>('/settings'),
   saveSettings: (patch: object) => request<SettingsResponse>('/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
   preparation: () => request<PreparationState>('/preparation'),
-  prepare: (id: string, provider: Provider, familiarity?: Familiarity, action: PrepareAction = 'continue') => request<PreparationJob>('/source-bundles/' + encodeURIComponent(id) + '/prepare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,familiarity,action})}),
+  prepare: (id: string, provider: Provider, familiarity?: Familiarity, action: PrepareAction = 'continue', steer = false) => request<PreparationJob>('/source-bundles/' + encodeURIComponent(id) + '/prepare', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,familiarity,action,steer})}),
   reveal: (slug: string) => request<void>('/library/' + encodeURIComponent(slug) + '/reveal', { method: 'POST' }),
+  saveSteering: (id: string, patch: SteerPatch) => request<SteeringPlan>('/preparation/' + encodeURIComponent(id) + '/steering', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}),
+  expandTopic: (id: string, topicId: string) => request<PreparationJob>('/preparation/' + encodeURIComponent(id) + '/steering/expand', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topicId})}),
+  collapseTopic: (id: string, topicId: string) => request<SteeringPlan>('/preparation/' + encodeURIComponent(id) + '/steering/collapse', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topicId})}),
+  confirmSteering: (id: string, input: { patch?: SteerPatch; suggested?: boolean }) => request<PreparationJob>('/preparation/' + encodeURIComponent(id) + '/steering/confirm', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)}),
   stopPreparation: (id: string) => request<PreparationJob>('/preparation/' + encodeURIComponent(id) + '/stop', {method:'POST'}),
   bundles: () => request<BundleSummary[]>('/source-bundles'),
   bundle: (id: string) => request<SourceBundle>('/source-bundles/' + encodeURIComponent(id)),

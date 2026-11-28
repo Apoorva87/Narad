@@ -18,9 +18,9 @@ const sections: { id: string; title: string; description: string }[] = [
   { id: 'voice', title: 'Voice', description: 'Default narration voices, speed and speaking style.' },
 ];
 const promptsBySection: Record<string, PromptKey[]> = {
-  modes: ['summary', 'walkthroughGuidance', 'dialogueGuidance', 'courseGuidance', 'visualGuidance'],
+  modes: ['summary', 'walkthroughGuidance', 'dialogueGuidance', 'courseGuidance', 'visualGuidance', 'steerGuidance'],
   teaching: ['principles', 'levelFoundational', 'levelSomeBackground', 'levelAdvanced'],
-  steps: ['research', 'section', 'revision', 'review'],
+  steps: ['research', 'outline', 'steeredResearch', 'section', 'revision', 'review', 'steerSummary'],
   voice: ['hostStyle', 'tutorStyle'],
 };
 
@@ -82,7 +82,10 @@ export function SettingsPage({ onBack }: { onBack: () => void }) {
             <NumberField label="Lessons at once" hint="How many lessons can prepare at the same time. Each runs its own sections in parallel on your agent account, so lessons × sections at once can hit rate limits." min={1} max={5} step={1} {...field('preparation', 'lessonsAtOnce')} />
           </div>}
           {section.id === 'capture' && <div className="settings-grid">
-            <NumberField label="Links found by topic research" hint="Used when a lesson starts from notes only." min={1} max={12} {...field('research', 'maxLinks')} />
+            <NumberField label="Links found by topic research" hint="Used when a lesson starts from notes only, without steering. Cannot exceed “Links per lesson”." min={1} max={12} {...field('research', 'maxLinks')} />
+            <NumberField label="Steered research: links per Summary topic" hint="Articles found for each topic or sub-topic you keep on Summary." min={1} max={2} {...field('research', 'summaryLinks')} />
+            <NumberField label="Steered research: links per Deeper topic" hint="Articles found for each topic or sub-topic you mark Deeper." min={1} max={4} {...field('research', 'deepLinks')} />
+            <NumberField label="Steered research: most links per lesson" hint="Upper limit across all chosen topics; over it, Deeper topics give up links first. Independent of “Links per lesson”." min={2} max={30} {...field('research', 'steeredMaxLinks')} />
             <NumberField label="Links per lesson" hint="Article links you can add at once." min={1} max={12} {...field('capture', 'maxLinks')} />
             <NumberField label="Images per lesson" hint="Images you can add at once (5 MB each)." min={1} max={6} {...field('capture', 'maxImages')} />
           </div>}

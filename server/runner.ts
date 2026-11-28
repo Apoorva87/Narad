@@ -16,7 +16,7 @@ const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, r
   signal.addEventListener('abort', done, { once: true });
 });
 
-export type CallInput = { step: 'research' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
+export type CallInput = { step: 'research' | 'outline' | 'author' | 'review' | 'summary'; task: string; prompt: string; schema: z.ZodType; images: string[]; provider: Provider; model?: string; timeoutMs: number; multiAgent?:boolean; reasoningEffort?:'low'|'medium' };
 
 /**
  * Runs every preparation agent call the same way. Files per call in `<dir>/calls/`:

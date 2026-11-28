@@ -289,3 +289,41 @@ video.video-frame{object-fit:contain}
 .presentation-transcript .worked-number{background:#4a4226;color:#f1e3b8}.presentation-transcript .worked-result{background:#173a30}.presentation-transcript .worked-result strong{color:#8fd6bb}
 .presentation-transcript .worked-actions .text-link{color:#b9ab84}.presentation-transcript .worked .secondary-button{background:#2c3a59;color:#e8edf6;border-color:#465883}
 @media(max-width:760px){.worked{padding:16px}}
+
+/* Steer the research: the checkbox before preparing, and the topic outline while the run waits for the learner's picks. */
+.steer-option{display:flex;align-items:flex-start;gap:10px;margin-top:20px;cursor:pointer;font-size:13px;color:#33476a}
+.steer-option input{margin:3px 0 0;width:16px;height:16px;accent-color:#3154bd}
+.steer-option span{display:grid;gap:2px}.steer-option small{color:#647797;font-size:12px}
+.outline{margin-top:16px;min-width:0}
+.outline-help{margin:0 0 12px;font-size:13px;color:#516583}
+.outline-working{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;color:#3154bd}.outline-working:not(:empty){margin:0 0 12px}
+.outline-wait,.wait-hint{color:#647797;font-size:12px}
+.outline-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;min-width:0}
+.outline-list>li{min-width:0}
+.outline-children{margin:8px 0 0 14px;padding-left:12px;border-left:2px solid #dce5f5}
+.outline-card{display:grid;gap:8px;min-width:0;margin:0;padding:10px 12px;border:1px solid #e0e7f0;border-radius:8px;background:#fff}
+.outline-card:disabled{opacity:.7}
+.outline-card.skipped .outline-title,.outline-card.skipped .outline-blurb{opacity:.55}
+.outline-card-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.outline-title{font-size:14px;color:#25395c;overflow-wrap:anywhere}
+.outline-badge{font-size:11px;color:#516583;background:#eef2fa;border-radius:999px;padding:1px 8px}
+.outline-blurb{margin:0;font-size:13px;line-height:1.5;color:#647797;overflow-wrap:anywhere}
+.outline-choices{display:grid;grid-template-columns:repeat(var(--choices,3),minmax(0,1fr));gap:8px}
+.outline-choices label{position:relative;display:grid;place-items:center;min-height:36px;border:1px solid #d6dfeb;border-radius:8px;padding:6px 10px;cursor:pointer;background:#fff}
+.outline-choices label.selected{border-color:#5574ce;background:#f3f6ff;box-shadow:0 0 0 1px #5574ce}
+.outline-choices label:focus-within{outline:2px solid #b8c9f8}
+.outline-choices input{position:absolute;opacity:0;pointer-events:none}
+.outline-choices strong{font-size:12px;font-weight:600;color:#25395c}
+.outline-card-links{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 16px;min-width:0}
+.outline-card-links .text-link{display:inline-flex;align-items:center;gap:5px;min-width:0;padding:4px 0;font-size:12px;text-align:left}
+.outline-note-toggle span{overflow-wrap:anywhere}
+.outline-unused-note{margin:8px 0 0 14px;font-size:12px;line-height:1.5;color:#647797}
+.outline-unused .outline-card{opacity:.6}
+.outline-cost{margin:12px 0 0;font-size:12px;line-height:1.6;color:#647797;min-height:1em}.outline-cost:empty{display:none}.outline-cap{display:block}
+.outline-note,.outline-focus textarea{width:100%;resize:vertical;padding:8px 10px;border:1px solid #cad6e7;border-radius:8px;font-size:13px;line-height:1.5;color:#21334b;background:#fff}
+.outline-focus{display:grid;gap:6px;margin-top:14px}
+.outline-focus label{font-size:12px;font-weight:600;color:#46536a}.outline-focus label span{font-weight:400;color:#76839a}
+.outline-footer{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:#516583}
+.outline-save{color:#647797;min-height:1em}
+.outline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:12px}
+@media(max-width:600px){.outline-children{margin-left:6px;padding-left:8px}.outline-card{padding:10px}.outline-unused-note{margin-left:6px}.outline-card-links .text-link{min-height:32px}.outline-choices label{min-height:40px;padding:6px 4px}.outline-actions{flex-direction:column;align-items:stretch}.outline-actions button{width:100%;justify-content:center;min-height:40px}}

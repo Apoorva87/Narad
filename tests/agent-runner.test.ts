@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { claudeUsage, codexUsage, executeProcess, providerArgs } from '../server/agent-runner';
+import { claudeUsage, codexUsage, executeProcess, providerArgs, usesWebSearch } from '../server/agent-runner';
 it('passes prompt text through stdin without shell evaluation and captures the result',async()=>{
  const r=await executeProcess({command:process.execPath,args:['-e',"let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(s))"],cwd:process.cwd(),input:'$(touch unwanted) `hello`',signal:new AbortController().signal,timeoutMs:3000});expect(r.stdout).toBe('$(touch unwanted) `hello`');
 });
@@ -26,6 +26,12 @@ it('bounds process time and output',async()=>{
 it('uses structured noninteractive modes without permission bypass flags',()=>{
  for(const provider of ['codex','claude'] as const) {const args=providerArgs(provider,{schemaPath:'/tmp/schema',outputPath:'/tmp/result',schema:{type:'object'},images:[],research:false});expect(args.join(' ')).not.toContain('bypass');expect(args.join(' ')).not.toContain('skip-permissions');}
  expect(providerArgs('claude',{schemaPath:'schema',outputPath:'out',schema:{},images:[],research:false})).toContain('--json-schema');
+});
+it('turns web search on for outline and research calls only, unless a request says otherwise',()=>{
+ expect((['outline','research','author','review','summary','tutor'] as const).map(kind=>usesWebSearch({kind}))).toEqual([true,true,false,false,false,false]);
+ expect(usesWebSearch({kind:'tutor',research:true})).toBe(true);expect(usesWebSearch({kind:'outline',research:false})).toBe(false);
+ expect(providerArgs('codex',{schemaPath:'schema',outputPath:'out',schema:{},images:[],research:usesWebSearch({kind:'outline'})}).join(' ')).toContain('web_search="live"');
+ expect(providerArgs('claude',{schemaPath:'schema',outputPath:'out',schema:{},images:[],research:usesWebSearch({kind:'outline'})})).toContain('WebSearch');
 });
 it('enables native Codex subagents and low reasoning only for an opted-in request',()=>{
  const coordinated=providerArgs('codex',{schemaPath:'schema',outputPath:'out',schema:{},images:[],research:false,multiAgent:true,reasoningEffort:'low'}).join(' ');

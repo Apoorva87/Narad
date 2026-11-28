@@ -77,7 +77,7 @@ tts_health_response() {
 
 tts_healthy() {
   local response
-  response="$(tts_health_response)" || return 1
+  response="$(tts_health_response 2>/dev/null)" || return 1
   [[ "$response" == *'"state":'* ]]
 }
 
@@ -168,9 +168,22 @@ show_status() {
   fi
   echo
   show_tts_status
-  if curl -fsS http://127.0.0.1:${NARAD_PORT:-4318}/api/health >/dev/null 2>&1; then echo "Narad API: ready at http://127.0.0.1:${NARAD_PORT:-4318}"
+  if api_healthy; then echo "Narad API: ready at http://127.0.0.1:${NARAD_PORT:-4318}"
   else echo "Narad API: unavailable"
   fi
+}
+
+api_healthy() {
+  curl --max-time 3 -fsS "http://127.0.0.1:${NARAD_PORT:-4318}/api/health" >/dev/null 2>&1
+}
+
+wait_for_api() {
+  # `compose up --detach` returns before the API container passes its healthcheck.
+  for _ in {1..60}; do
+    if api_healthy; then return 0; fi
+    sleep 1
+  done
+  return 1
 }
 
 start_all() {
@@ -178,7 +191,13 @@ start_all() {
   docker info >/dev/null 2>&1 || { echo "The Docker daemon is not running. Start Docker Desktop or your Docker runtime." >&2; return 1; }
   find_compose;ensure_runtime;start_tts
   compose up --detach --build
+  local api_ready=0
+  wait_for_api && api_ready=1
   show_status
+  if [[ "$api_ready" == 0 ]]; then
+    echo "The Narad API did not become ready within 60s. Check: ${compose_command[*]} logs api" >&2
+    return 1
+  fi
 }
 
 kill_all() {

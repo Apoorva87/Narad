@@ -3,7 +3,7 @@ import type { SpeechService } from './speech';
 import type { TutorService } from './tutor';
 import { enrichSpeechStyle, speechRequestSchema, splitSpeech } from '../shared/speech';
 import { tutorAskSchema, tutorSpeechRequestSchema } from '../shared/tutor';
-import { prepareInput, renameInput } from '../shared/preparation';
+import { prepareInput, renameInput, steerCollapseInput, steerConfirmInput, steerExpandInput, steerPatchInput } from '../shared/preparation';
 import { defaultSettings, settingsSchema, type Settings } from '../shared/settings';
 import express, { type ErrorRequestHandler } from 'express';
 import sharp from 'sharp';
@@ -82,10 +82,20 @@ export function createApp(store: LessonStore, preparation?: PreparationService, 
   app.get('/api/preparation', (_req, res) => res.json(jobs().state()));
   app.post('/api/source-bundles/:id/prepare', (req, res) => {
     if (capturing) throw new StoreError('Wait for source capture to finish before preparing a lesson.', 409);
-    const { provider, familiarity, action } = prepareInput.parse(req.body);
-    res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity, action));
+    const { provider, familiarity, action, steer } = prepareInput.parse(req.body);
+    res.status(202).json(jobs().start(bundleSlug(req.params.id), provider, familiarity, action, steer));
   });
   app.post('/api/preparation/:id/stop', async (req, res) => res.json(await jobs().stop(req.params.id)));
+  // "Steer the research": the outline of a topic-only lesson, edited while its run waits (`awaiting-input`).
+  app.get('/api/preparation/:id/steering', (req, res) => res.json(jobs().steering(req.params.id)));
+  app.patch('/api/preparation/:id/steering', (req, res) => res.json(jobs().patchSteering(req.params.id, steerPatchInput.parse(req.body))));
+  app.post('/api/preparation/:id/steering/expand', (req, res) => res.status(202).json(jobs().expand(req.params.id, steerExpandInput.parse(req.body).topicId)));
+  app.post('/api/preparation/:id/steering/collapse', (req, res) => res.json(jobs().collapse(req.params.id, steerCollapseInput.parse(req.body).topicId)));
+  app.post('/api/preparation/:id/steering/confirm', (req, res) => {
+    // Confirming captures the found articles, like preparing does.
+    if (capturing) throw new StoreError('Wait for source capture to finish before preparing a lesson.', 409);
+    res.status(202).json(jobs().confirm(req.params.id, steerConfirmInput.parse(req.body ?? {})));
+  });
   let capturing = false;
   app.get('/api/source-bundles', (_req, res) => res.json(store.listBundles()));
   app.post('/api/source-bundles', async (req, res) => {

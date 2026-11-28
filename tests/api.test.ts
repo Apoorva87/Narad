@@ -178,7 +178,7 @@ it('reads and partially updates settings, rejecting invalid prompts without savi
 });
 it('applies capture limits from settings', async () => {
   const base = await setup();
-  store.saveSettings({ ...store.getSettings(), capture: { maxLinks: 4, maxImages: 1 }, research: { maxLinks: 2 } });
+  store.saveSettings({ ...store.getSettings(), capture: { maxLinks: 4, maxImages: 1 }, research: { ...store.getSettings().research, maxLinks: 2 } });
   const response = await fetch(base + '/api/source-bundles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: Array.from({ length: 5 }, (_, i) => 'https://example.com/' + i).join('\n') }) });
   expect(response.status).toBe(400);
   expect((await response.json()).error).toMatch(/up to 4 links/);

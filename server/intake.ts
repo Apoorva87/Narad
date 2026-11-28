@@ -15,7 +15,7 @@ export async function retrySources(previous: SourceBundle, download?: Download):
   return { bundle: { ...previous, sources, status: sources.some(isBlocking) ? 'needs-review' : 'captured' }, blobs };
 }
 
-export async function prepareSources(input: SourceInput, download?: Download, limits: { maxLinks: number; maxImages: number } = { maxLinks: 8, maxImages: 6 }): Promise<{ bundle: SourceBundle; blobs: AssetBlob[] }> {
+export async function prepareSources(input: SourceInput, download?: Download, limits: { maxLinks: number; maxImages: number } = { maxLinks: 8, maxImages: 6 }, signal?: AbortSignal): Promise<{ bundle: SourceBundle; blobs: AssetBlob[] }> {
   const { title, text, images, familiarity } = sourceInputSchema.parse(input);
   const urls = [...new Set((text.match(/https?:\/\/[^\s<>"\]]+/g) ?? []).map(url => url.replace(/[),.;]+$/, '')))];
   if (urls.length > limits.maxLinks) throw new StoreError('Add up to ' + limits.maxLinks + ' links at a time. Change the limit in Settings.', 400);
@@ -33,6 +33,8 @@ export async function prepareSources(input: SourceInput, download?: Download, li
         credit: { pageTitle: image.name, pageUrl: '', creditLine: 'Your upload: ' + image.name, capturedAt: new Date().toISOString() } }], warnings: [], inventory: { ...inventory(), images: 1, savedVisuals: 1 } });
   }
   for (const url of urls) {
+    // A stopped preparation captures nothing further.
+    signal?.throwIfAborted();
     try { const captured = await captureArticle(url, download); sources.push(captured.source); blobs.push(...captured.blobs); }
     catch (error) { sources.push({ id: randomUUID(), title: url, kind: 'article', url, markdown: '', assets: [], warnings: [{ kind: 'blocking', message: error instanceof Error ? error.message : 'Could not capture this link.' }], inventory: inventory() }); }
   }

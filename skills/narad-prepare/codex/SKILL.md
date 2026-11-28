@@ -23,6 +23,7 @@ The API defaults to http://127.0.0.1:4318 (`NARAD_API_URL` overrides it). If `no
 4. Check progress at sensible intervals (a long article can take an hour or more):
    `node --import tsx scripts/narad.ts status <slug>`
    Only status `completed` means a lesson was published. Report `failed`, `stopped` or `interrupted` honestly with the error shown.
+   If `status` shows `waiting for topic choices in the app`, the user turned on “Steer the research” there: nothing is running, and the lesson continues only after they pick topics in the app (tell them; do not restart it unless they ask).
 5. Give the user the reader link: `node --import tsx scripts/narad.ts link <slug>`, and the folder path from `status` (sources, media, CREDITS.md, lesson.json and the agent's prompts/results live there).
 
 ## Continue, start over, stop
